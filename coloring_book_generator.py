@@ -380,12 +380,56 @@ class ColoringBookGenerator:
 
         return None
 
-    def convert_to_coloring_page(self, image_bytes: bytes, method: str = "enhanced") -> bytes:
+    def upscale_to_print_quality(self, image_bytes: bytes, target_size: tuple = (2550, 3300)) -> bytes:
+        """Upscale image to print quality resolution if needed.
+
+        Args:
+            image_bytes: Input image as bytes
+            target_size: Target size for print (default: 8.5x11" at 300 DPI)
+
+        Returns:
+            Upscaled image as bytes
+        """
+        try:
+            import cv2
+            import numpy as np
+            from PIL import Image
+            from io import BytesIO
+
+            # Load image
+            nparr = np.frombuffer(image_bytes, np.uint8)
+            img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
+            if img is None:
+                return image_bytes
+
+            # Check if upscaling needed
+            if img.shape[0] < target_size[1] or img.shape[1] < target_size[0]:
+                logger.info(f"  Upscaling from {img.shape[1]}x{img.shape[0]} to {target_size[0]}x{target_size[1]} for print quality")
+                img = cv2.resize(img, target_size, interpolation=cv2.INTER_LANCZOS4)
+
+                # Convert to PIL and save with DPI
+                pil_img = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+                pil_img.info['dpi'] = (300, 300)
+
+                output = BytesIO()
+                pil_img.save(output, format='PNG', dpi=(300, 300))
+                return output.getvalue()
+
+            return image_bytes
+
+        except Exception as e:
+            logger.warning(f"Upscaling failed: {e}")
+            return image_bytes
+
+    def convert_to_coloring_page(self, image_bytes: bytes, method: str = "enhanced",
+                                 target_size: tuple = (2550, 3300)) -> bytes:
         """Post-process image to enforce pure black & white line art.
 
         Args:
             image_bytes: Input image as bytes
             method: 'enhanced' (thick bold lines), 'standard' (normal), or 'detailed' (fine lines)
+            target_size: Target size for print (default: 8.5x11" at 300 DPI)
         """
         try:
             import cv2
@@ -400,6 +444,11 @@ class ColoringBookGenerator:
             if img is None:
                 logger.warning("Failed to decode image")
                 return image_bytes
+
+            # Upscale if needed for print quality (before edge detection)
+            if img.shape[0] < target_size[1] or img.shape[1] < target_size[0]:
+                logger.info(f"  Upscaling from {img.shape[1]}x{img.shape[0]} to {target_size[0]}x{target_size[1]} for print quality")
+                img = cv2.resize(img, target_size, interpolation=cv2.INTER_LANCZOS4)
 
             # Convert to grayscale
             gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
@@ -463,11 +512,15 @@ class ColoringBookGenerator:
             # Anything not pure black becomes white
             _, result = cv2.threshold(result, 250, 255, cv2.THRESH_BINARY)
 
-            # Encode back to PNG bytes at high quality
-            encode_params = [cv2.IMWRITE_PNG_COMPRESSION, 3]
-            _, buffer = cv2.imencode('.png', result, encode_params)
+            # Convert to PIL to set DPI metadata
+            pil_img = Image.fromarray(result)
+            pil_img.info['dpi'] = (300, 300)  # Set 300 DPI for print quality
 
-            return buffer.tobytes()
+            # Save to bytes with DPI metadata
+            output = BytesIO()
+            pil_img.save(output, format='PNG', dpi=(300, 300))
+
+            return output.getvalue()
 
         except ImportError:
             logger.warning("OpenCV not installed, skipping line art conversion")
@@ -533,10 +586,14 @@ class ColoringBookGenerator:
 
             if self.backend == "pollinations":
                 # Pollinations.ai - completely free, no API key
-                image_bytes = self.generate_image_pollinations(prompt)
+                # Request larger size for better print quality (will scale to 2550x3300 if needed)
+                image_bytes = self.generate_image_pollinations(prompt, size=(1536, 1536))
                 if image_bytes:
                     if self.force_lineart:
                         image_bytes = self.convert_to_coloring_page(image_bytes, method=self.lineart_method)
+                    else:
+                        # Still upscale to print quality even without line art processing
+                        image_bytes = self.upscale_to_print_quality(image_bytes)
                     image_path.write_bytes(image_bytes)
                     success = True
             elif self.backend == "huggingface":
@@ -546,6 +603,9 @@ class ColoringBookGenerator:
                     # Apply line art conversion if enabled
                     if self.force_lineart:
                         image_bytes = self.convert_to_coloring_page(image_bytes, method=self.lineart_method)
+                    else:
+                        # Upscale to print quality even without line art processing
+                        image_bytes = self.upscale_to_print_quality(image_bytes)
                     image_path.write_bytes(image_bytes)
                     success = True
             else:
@@ -558,6 +618,11 @@ class ColoringBookGenerator:
                         img_bytes = image_path.read_bytes()
                         converted = self.convert_to_coloring_page(img_bytes, method=self.lineart_method)
                         image_path.write_bytes(converted)
+                    elif success:
+                        # Upscale to print quality even without line art processing
+                        img_bytes = image_path.read_bytes()
+                        upscaled = self.upscale_to_print_quality(img_bytes)
+                        image_path.write_bytes(upscaled)
 
             if success:
                 generated.append({
