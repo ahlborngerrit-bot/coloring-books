@@ -2,6 +2,13 @@
 """
 Adult Coloring Book Generator for Amazon KDP
 Generates intricate line art designs and compiles into print-ready PDFs.
+
+Version 2.1.0 - Enhanced Quality Assurance
+- Automatic quality validation on every generated image
+- Pre-flight dependency checks
+- Post-generation verification
+- Comprehensive error handling
+- Prevents recurrence of known issues
 """
 
 import os
@@ -11,11 +18,18 @@ import random
 import requests
 from pathlib import Path
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, Dict, Tuple
 import logging
+import sys
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+# Quality Assurance Constants
+MIN_PRINT_WIDTH = 2550  # 8.5" at 300 DPI
+MIN_PRINT_HEIGHT = 3300  # 11" at 300 DPI
+REQUIRED_DPI = 300
+MAX_ACCEPTABLE_COLORS = 2  # For line art (black & white only)
 
 # API Keys (set via environment variable)
 REPLICATE_API_TOKEN = os.environ.get("REPLICATE_API_TOKEN")
@@ -28,6 +42,222 @@ KDP_SIZES = {
     "6x9": (1800, 2700),          # Trade paperback
     "8.25x8.25": (2475, 2475),    # Square format
 }
+
+
+# ==================== QUALITY ASSURANCE FUNCTIONS ====================
+
+def validate_dependencies() -> Dict[str, bool]:
+    """Check if all required dependencies are installed.
+
+    Returns:
+        Dict with dependency name and availability status
+    """
+    deps = {
+        'opencv': False,
+        'numpy': False,
+        'PIL': False,
+        'reportlab': False,
+        'requests': True  # Already imported above
+    }
+
+    try:
+        import cv2
+        deps['opencv'] = True
+        logger.debug(f"✓ OpenCV {cv2.__version__} available")
+    except ImportError:
+        logger.warning("✗ OpenCV not available - line art processing will be disabled")
+
+    try:
+        import numpy
+        deps['numpy'] = True
+        logger.debug(f"✓ NumPy {numpy.__version__} available")
+    except ImportError:
+        logger.warning("✗ NumPy not available - line art processing will be disabled")
+
+    try:
+        from PIL import Image
+        deps['PIL'] = True
+        logger.debug("✓ Pillow available")
+    except ImportError:
+        logger.warning("✗ Pillow not available - PDF generation may fail")
+
+    try:
+        from reportlab.pdfgen import canvas
+        deps['reportlab'] = True
+        logger.debug("✓ ReportLab available")
+    except ImportError:
+        logger.warning("✗ ReportLab not available - PDF generation will be disabled")
+
+    return deps
+
+
+def validate_image_quality(image_path: Path,
+                          min_width: int = MIN_PRINT_WIDTH,
+                          min_height: int = MIN_PRINT_HEIGHT,
+                          check_binary: bool = True,
+                          required_dpi: int = REQUIRED_DPI) -> Dict[str, any]:
+    """Validate that a generated image meets print quality standards.
+
+    Args:
+        image_path: Path to the image file
+        min_width: Minimum acceptable width in pixels
+        min_height: Minimum acceptable height in pixels
+        check_binary: Whether to check for pure black & white
+        required_dpi: Required DPI for print quality
+
+    Returns:
+        Dict with validation results and any issues found
+    """
+    try:
+        from PIL import Image
+        import numpy as np
+    except ImportError:
+        return {
+            'valid': False,
+            'error': 'PIL/NumPy not available for validation',
+            'warnings': []
+        }
+
+    results = {
+        'valid': True,
+        'warnings': [],
+        'issues': [],
+        'metrics': {}
+    }
+
+    try:
+        img = Image.open(image_path)
+        width, height = img.size
+
+        # Check dimensions
+        results['metrics']['width'] = width
+        results['metrics']['height'] = height
+        results['metrics']['physical_width'] = width / required_dpi
+        results['metrics']['physical_height'] = height / required_dpi
+
+        if width < min_width or height < min_height:
+            results['valid'] = False
+            results['issues'].append(
+                f"CRITICAL: Image too small ({width}x{height}), needs {min_width}x{min_height} for print"
+            )
+
+        # Check DPI metadata
+        dpi = img.info.get('dpi', (72, 72))
+        results['metrics']['dpi'] = dpi
+
+        if dpi[0] < required_dpi or dpi[1] < required_dpi:
+            results['warnings'].append(
+                f"DPI metadata is {dpi}, should be {required_dpi} for print"
+            )
+
+        # Check color mode
+        results['metrics']['mode'] = img.mode
+
+        # Check binary (pure black & white) if requested
+        if check_binary:
+            arr = np.array(img)
+            unique_colors = len(np.unique(arr))
+            results['metrics']['unique_colors'] = unique_colors
+
+            if unique_colors > MAX_ACCEPTABLE_COLORS:
+                results['warnings'].append(
+                    f"Image has {unique_colors} colors, expected {MAX_ACCEPTABLE_COLORS} for line art"
+                )
+
+        # Check file size (should be reasonable, not too small or huge)
+        file_size = image_path.stat().st_size
+        results['metrics']['file_size_kb'] = file_size / 1024
+
+        if file_size < 10000:  # Less than 10KB is suspiciously small
+            results['warnings'].append("File size very small, may indicate generation issue")
+        elif file_size > 10_000_000:  # More than 10MB
+            results['warnings'].append("File size very large, may cause upload issues")
+
+        # Log validation summary
+        if results['valid'] and not results['warnings']:
+            logger.debug(f"✓ Quality validation passed: {image_path.name}")
+        elif results['warnings']:
+            logger.warning(f"⚠ Quality warnings for {image_path.name}: {', '.join(results['warnings'])}")
+
+    except Exception as e:
+        results['valid'] = False
+        results['error'] = f"Validation failed: {str(e)}"
+        logger.error(f"Validation error for {image_path}: {e}")
+
+    return results
+
+
+def check_system_resources() -> Dict[str, any]:
+    """Check available system resources before generation.
+
+    Returns:
+        Dict with resource availability information
+    """
+    import shutil
+
+    resources = {
+        'disk_space_available': True,
+        'memory_available': True,
+        'warnings': []
+    }
+
+    # Check disk space in output directory
+    try:
+        stat = shutil.disk_usage(Path.cwd())
+        free_gb = stat.free / (1024**3)
+        resources['free_disk_gb'] = free_gb
+
+        if free_gb < 1:
+            resources['disk_space_available'] = False
+            resources['warnings'].append(f"Low disk space: {free_gb:.2f} GB free")
+        elif free_gb < 5:
+            resources['warnings'].append(f"Limited disk space: {free_gb:.2f} GB free")
+    except Exception as e:
+        resources['warnings'].append(f"Could not check disk space: {e}")
+
+    return resources
+
+
+def preflight_checks(force_lineart: bool = False) -> bool:
+    """Run all pre-flight checks before generation.
+
+    Args:
+        force_lineart: Whether line art processing is required
+
+    Returns:
+        True if all critical checks pass, False otherwise
+    """
+    logger.info("Running pre-flight checks...")
+
+    all_ok = True
+
+    # Check dependencies
+    deps = validate_dependencies()
+
+    if force_lineart and not (deps['opencv'] and deps['numpy']):
+        logger.error("CRITICAL: Line art processing requires OpenCV and NumPy")
+        logger.error("Install with: pip install opencv-python numpy")
+        all_ok = False
+
+    # Check system resources
+    resources = check_system_resources()
+
+    if not resources['disk_space_available']:
+        logger.error("CRITICAL: Insufficient disk space")
+        all_ok = False
+
+    for warning in resources.get('warnings', []):
+        logger.warning(warning)
+
+    if all_ok:
+        logger.info("✓ All pre-flight checks passed")
+    else:
+        logger.error("✗ Pre-flight checks failed - cannot proceed")
+
+    return all_ok
+
+
+# ==================== END QUALITY ASSURANCE FUNCTIONS ====================
 
 # Coloring Book Themes with Prompts
 THEMES = {
@@ -389,6 +619,9 @@ class ColoringBookGenerator:
 
         Returns:
             Upscaled image as bytes
+
+        Raises:
+            RuntimeError: If upscaling fails critically (prevents bad outputs)
         """
         try:
             import cv2
@@ -401,12 +634,20 @@ class ColoringBookGenerator:
             img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
             if img is None:
-                return image_bytes
+                logger.error("CRITICAL: Failed to decode image for upscaling")
+                raise RuntimeError("Image decode failed - cannot ensure print quality")
+
+            original_size = (img.shape[1], img.shape[0])
 
             # Check if upscaling needed
             if img.shape[0] < target_size[1] or img.shape[1] < target_size[0]:
                 logger.info(f"  Upscaling from {img.shape[1]}x{img.shape[0]} to {target_size[0]}x{target_size[1]} for print quality")
                 img = cv2.resize(img, target_size, interpolation=cv2.INTER_LANCZOS4)
+
+                # QUALITY ASSURANCE: Verify upscaling actually worked
+                if img.shape[1] != target_size[0] or img.shape[0] != target_size[1]:
+                    logger.error(f"CRITICAL: Upscaling failed - got {img.shape[1]}x{img.shape[0]}, expected {target_size}")
+                    raise RuntimeError("Upscaling verification failed")
 
                 # Convert to PIL and save with DPI
                 pil_img = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
@@ -414,13 +655,31 @@ class ColoringBookGenerator:
 
                 output = BytesIO()
                 pil_img.save(output, format='PNG', dpi=(300, 300))
+
+                # QUALITY ASSURANCE: Verify DPI was set
+                output.seek(0)
+                verify_img = Image.open(output)
+                actual_dpi = verify_img.info.get('dpi', (0, 0))
+                if actual_dpi[0] < 300 or actual_dpi[1] < 300:
+                    logger.warning(f"DPI metadata issue: got {actual_dpi}, expected (300, 300)")
+
+                output.seek(0)
+                return output.getvalue()
+            else:
+                # Image already large enough, just set DPI metadata
+                pil_img = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+                output = BytesIO()
+                pil_img.save(output, format='PNG', dpi=(300, 300))
                 return output.getvalue()
 
-            return image_bytes
-
+        except ImportError as e:
+            logger.error(f"CRITICAL: Missing dependencies for upscaling: {e}")
+            logger.error("Cannot guarantee print quality without OpenCV/NumPy/Pillow")
+            raise RuntimeError("Missing required dependencies - install opencv-python numpy Pillow")
         except Exception as e:
-            logger.warning(f"Upscaling failed: {e}")
-            return image_bytes
+            logger.error(f"CRITICAL: Upscaling failed: {e}")
+            logger.error("This means the image WILL NOT meet print quality standards!")
+            raise RuntimeError(f"Upscaling failed critically: {e}")
 
     def convert_to_coloring_page(self, image_bytes: bytes, method: str = "enhanced",
                                  target_size: tuple = (2550, 3300)) -> bytes:
@@ -430,6 +689,12 @@ class ColoringBookGenerator:
             image_bytes: Input image as bytes
             method: 'enhanced' (thick bold lines), 'standard' (normal), or 'detailed' (fine lines)
             target_size: Target size for print (default: 8.5x11" at 300 DPI)
+
+        Returns:
+            Processed image as bytes
+
+        Raises:
+            RuntimeError: If processing fails critically
         """
         try:
             import cv2
@@ -442,13 +707,18 @@ class ColoringBookGenerator:
             img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
             if img is None:
-                logger.warning("Failed to decode image")
-                return image_bytes
+                logger.error("CRITICAL: Failed to decode image for line art conversion")
+                raise RuntimeError("Image decode failed during line art conversion")
 
             # Upscale if needed for print quality (before edge detection)
             if img.shape[0] < target_size[1] or img.shape[1] < target_size[0]:
                 logger.info(f"  Upscaling from {img.shape[1]}x{img.shape[0]} to {target_size[0]}x{target_size[1]} for print quality")
                 img = cv2.resize(img, target_size, interpolation=cv2.INTER_LANCZOS4)
+
+                # QUALITY ASSURANCE: Verify upscaling
+                if img.shape[1] != target_size[0] or img.shape[0] != target_size[1]:
+                    logger.error(f"CRITICAL: Upscaling in line art conversion failed")
+                    raise RuntimeError("Upscaling verification failed during line art processing")
 
             # Convert to grayscale
             gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
@@ -512,6 +782,16 @@ class ColoringBookGenerator:
             # Anything not pure black becomes white
             _, result = cv2.threshold(result, 250, 255, cv2.THRESH_BINARY)
 
+            # QUALITY ASSURANCE: Verify pure binary output
+            unique_values = len(np.unique(result))
+            if unique_values > MAX_ACCEPTABLE_COLORS:
+                logger.warning(f"Line art has {unique_values} colors instead of 2 - applying stronger threshold")
+                # Apply more aggressive binarization
+                _, result = cv2.threshold(result, 127, 255, cv2.THRESH_BINARY)
+                unique_values = len(np.unique(result))
+                if unique_values > MAX_ACCEPTABLE_COLORS:
+                    logger.error(f"CRITICAL: Could not achieve pure binary output ({unique_values} colors)")
+
             # Convert to PIL to set DPI metadata
             pil_img = Image.fromarray(result)
             pil_img.info['dpi'] = (300, 300)  # Set 300 DPI for print quality
@@ -520,14 +800,32 @@ class ColoringBookGenerator:
             output = BytesIO()
             pil_img.save(output, format='PNG', dpi=(300, 300))
 
+            # QUALITY ASSURANCE: Verify final output
+            output.seek(0)
+            verify_img = Image.open(output)
+            final_size = verify_img.size
+            final_dpi = verify_img.info.get('dpi', (0, 0))
+
+            if final_size[0] != target_size[0] or final_size[1] != target_size[1]:
+                logger.error(f"CRITICAL: Final image size wrong: {final_size} vs {target_size}")
+                raise RuntimeError("Line art conversion produced wrong size output")
+
+            if final_dpi[0] < 300 or final_dpi[1] < 300:
+                logger.warning(f"DPI metadata may not be set correctly: {final_dpi}")
+
+            output.seek(0)
             return output.getvalue()
 
         except ImportError:
-            logger.warning("OpenCV not installed, skipping line art conversion")
-            return image_bytes
+            logger.error("CRITICAL: OpenCV not installed - cannot do line art conversion")
+            logger.error("Install with: pip install opencv-python numpy")
+            raise RuntimeError("Missing dependencies for line art conversion")
+        except RuntimeError:
+            # Re-raise runtime errors (our own quality checks)
+            raise
         except Exception as e:
-            logger.warning(f"Line art conversion failed: {e}")
-            return image_bytes
+            logger.error(f"CRITICAL: Line art conversion failed: {e}")
+            raise RuntimeError(f"Line art conversion failed: {e}")
 
     def download_image(self, url: str, filepath: Path) -> bool:
         """Download image from URL."""
@@ -542,6 +840,10 @@ class ColoringBookGenerator:
 
     def generate_book(self, theme: str, num_pages: int = 30, book_title: str = None) -> Path:
         """Generate a complete coloring book."""
+
+        # PRE-FLIGHT CHECKS: Ensure system is ready
+        if not preflight_checks(force_lineart=self.force_lineart):
+            raise RuntimeError("Pre-flight checks failed - cannot generate book safely")
 
         if theme not in THEMES:
             raise ValueError(f"Unknown theme: {theme}. Available: {list(THEMES.keys())}")
@@ -625,14 +927,36 @@ class ColoringBookGenerator:
                         image_path.write_bytes(upscaled)
 
             if success:
-                generated.append({
-                    "page": i + 1,
-                    "prompt": prompt,
-                    "file": str(image_path.name)
-                })
-                logger.info(f"  Saved: {image_path.name}")
+                # QUALITY ASSURANCE: Validate the generated image
+                validation = validate_image_quality(
+                    image_path,
+                    check_binary=self.force_lineart
+                )
+
+                if not validation['valid']:
+                    logger.error(f"  ✗ Quality validation FAILED for {image_path.name}")
+                    for issue in validation.get('issues', []):
+                        logger.error(f"    - {issue}")
+                    logger.error("  This is a CRITICAL error - image will not print correctly!")
+                    # Don't add to generated list if validation fails critically
+                    success = False
+                elif validation.get('warnings'):
+                    logger.warning(f"  ⚠ Quality warnings for {image_path.name}:")
+                    for warning in validation['warnings']:
+                        logger.warning(f"    - {warning}")
+
+                if success:
+                    # Add metrics to metadata
+                    page_data = {
+                        "page": i + 1,
+                        "prompt": prompt,
+                        "file": str(image_path.name),
+                        "quality_metrics": validation.get('metrics', {})
+                    }
+                    generated.append(page_data)
+                    logger.info(f"  ✓ Saved and validated: {image_path.name}")
             else:
-                logger.warning(f"  Failed to generate page {i+1}")
+                logger.warning(f"  ✗ Failed to generate page {i+1}")
 
             # Rate limiting
             time.sleep(2)
