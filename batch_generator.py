@@ -16,13 +16,29 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 
-def generate_all_books(themes: list = None, pages_per_book: int = 30, output_dir: str = "output"):
-    """Generate coloring books for multiple themes."""
+def generate_all_books(themes: list = None, pages_per_book: int = 30, output_dir: str = "output",
+                      backend: str = "pollinations", force_lineart: bool = True,
+                      lineart_method: str = "enhanced"):
+    """Generate coloring books for multiple themes.
+
+    Args:
+        themes: List of theme names to generate
+        pages_per_book: Number of pages per book
+        output_dir: Output directory path
+        backend: AI backend to use (pollinations, huggingface, replicate)
+        force_lineart: Enable enhanced line art processing
+        lineart_method: Line art quality (enhanced, standard, detailed)
+    """
 
     if themes is None:
         themes = list(THEMES.keys())
 
-    generator = ColoringBookGenerator(output_dir=output_dir)
+    generator = ColoringBookGenerator(
+        output_dir=output_dir,
+        backend=backend,
+        force_lineart=force_lineart,
+        lineart_method=lineart_method
+    )
 
     results = []
 
@@ -94,6 +110,16 @@ def main():
                        help="Pages per book (default: 30)")
     parser.add_argument("--output", type=str, default="output",
                        help="Output directory")
+    parser.add_argument("--backend", choices=["pollinations", "huggingface", "replicate"],
+                       default="pollinations",
+                       help="Image generation backend (default: pollinations - free)")
+    parser.add_argument("--force-lineart", action="store_true", default=True,
+                       help="Enable line art post-processing (default: True)")
+    parser.add_argument("--no-lineart", action="store_true",
+                       help="Disable line art post-processing")
+    parser.add_argument("--lineart-method", choices=["enhanced", "standard", "detailed"],
+                       default="enhanced",
+                       help="Line art extraction method (default: enhanced)")
 
     args = parser.parse_args()
 
@@ -106,10 +132,23 @@ def main():
         parser.print_help()
         return
 
+    # Handle --no-lineart flag
+    force_lineart = not args.no_lineart if args.no_lineart else args.force_lineart
+
+    logger.info(f"Batch generation settings:")
+    logger.info(f"  Themes: {len(themes)}")
+    logger.info(f"  Pages per book: {args.pages}")
+    logger.info(f"  Backend: {args.backend}")
+    logger.info(f"  Line art processing: {force_lineart}")
+    logger.info(f"  Line art method: {args.lineart_method}")
+
     generate_all_books(
         themes=themes,
         pages_per_book=args.pages,
-        output_dir=args.output
+        output_dir=args.output,
+        backend=args.backend,
+        force_lineart=force_lineart,
+        lineart_method=args.lineart_method
     )
 
 

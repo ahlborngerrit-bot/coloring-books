@@ -68,6 +68,23 @@ python batch_generator.py --all-themes --pages 30
 python batch_generator.py --themes mandalas animals nature --pages 40
 ```
 
+## 🛠️ Available Tools
+
+| Script | Purpose | Use Case |
+|--------|---------|----------|
+| **[complete_book_workflow.py](complete_book_workflow.py)** | All-in-one solution | Create complete book ready for KDP |
+| **[coloring_book_generator.py](coloring_book_generator.py)** | Main generator | Generate individual books |
+| **[batch_generator.py](batch_generator.py)** | Batch processing | Generate multiple books at once |
+| **[cover_generator.py](cover_generator.py)** | Cover creation | Generate professional book covers |
+| **[test_improved_lineart.py](test_improved_lineart.py)** | Quality testing | Test line art conversion |
+
+## 📖 Complete Documentation
+
+- **[QUICK_REFERENCE.md](QUICK_REFERENCE.md)** - Command reference and common workflows
+- **[IMPROVEMENTS.md](IMPROVEMENTS.md)** - Complete usage guide and examples
+- **[SETUP_GUIDE.md](SETUP_GUIDE.md)** - Installation instructions
+- **[CHANGELOG.md](CHANGELOG.md)** - Version history and technical details
+
 ## Output Structure
 
 ```
@@ -77,6 +94,8 @@ output/
     │   ├── page_001.png
     │   ├── page_002.png
     │   └── ...
+    ├── cover/
+    │   └── cover_theme_Title.png
     ├── metadata.json
     └── Book_Title.pdf
 ```
