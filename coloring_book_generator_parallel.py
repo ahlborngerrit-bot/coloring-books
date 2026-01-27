@@ -1,0 +1,268 @@
+#!/usr/bin/env python3
+"""
+Parallel version of ColoringBookGenerator
+
+Adds concurrent generation capabilities to speed up book creation.
+Can reduce 30-page book from ~10 minutes to ~4-5 minutes.
+
+Usage:
+    from coloring_book_generator_parallel import ParallelColoringBookGenerator
+
+    gen = ParallelColoringBookGenerator(
+        backend='pollinations',
+        force_lineart=True,
+        max_workers=3  # Generate 3 pages concurrently
+    )
+
+    book_dir = gen.generate_book_parallel(
+        theme='mandalas',
+        num_pages=30
+    )
+"""
+
+import concurrent.futures
+from typing import Tuple, Optional
+from pathlib import Path
+import time
+import random
+
+from coloring_book_generator import (
+    ColoringBookGenerator,
+    THEMES,
+    logger,
+    preflight_checks,
+    validate_image_quality
+)
+
+
+class ParallelColoringBookGenerator(ColoringBookGenerator):
+    """Coloring book generator with parallel processing support."""
+
+    def __init__(self, output_dir: str = "output", backend: str = "pollinations",
+                 force_lineart: bool = False, lineart_method: str = "enhanced",
+                 max_workers: int = 3):
+        """Initialize parallel generator.
+
+        Args:
+            output_dir: Output directory
+            backend: AI backend to use
+            force_lineart: Whether to force line art conversion
+            lineart_method: Line art processing method
+            max_workers: Maximum concurrent workers (default: 3)
+                        Recommended: 2-4 to avoid rate limiting
+        """
+        super().__init__(output_dir, backend, force_lineart, lineart_method)
+        self.max_workers = max_workers
+
+    def _generate_single_page(self, page_num: int, prompt: str,
+                              images_dir: Path) -> Tuple[int, bool, dict]:
+        """Generate a single page (designed for parallel execution).
+
+        Args:
+            page_num: Page number (1-indexed)
+            prompt: Image generation prompt
+            images_dir: Directory to save images
+
+        Returns:
+            Tuple of (page_num, success, page_data)
+        """
+        image_path = images_dir / f"page_{page_num:03d}.png"
+        success = False
+        page_data = None
+
+        try:
+            logger.info(f"  [{page_num}] Generating...")
+
+            # Generate based on backend
+            if self.backend == "pollinations":
+                image_bytes = self.generate_image_pollinations(prompt, size=(1536, 1536))
+            elif self.backend == "huggingface":
+                image_bytes = self.generate_image_huggingface(prompt)
+            else:  # replicate
+                image_url = self.generate_image_replicate(prompt)
+                if image_url:
+                    if self.download_image(image_url, image_path):
+                        image_bytes = image_path.read_bytes()
+                    else:
+                        image_bytes = None
+                else:
+                    image_bytes = None
+
+            if image_bytes:
+                # Post-process (upscale and/or line art)
+                image_bytes = self._post_process_image(image_bytes)
+                image_path.write_bytes(image_bytes)
+                success = True
+
+            if success:
+                # Validate
+                validation = validate_image_quality(
+                    image_path,
+                    check_binary=self.force_lineart
+                )
+
+                if not validation['valid']:
+                    logger.error(f"  [{page_num}] ✗ Quality validation FAILED")
+                    for issue in validation.get('issues', []):
+                        logger.error(f"    - {issue}")
+                    success = False
+                elif validation.get('warnings'):
+                    logger.warning(f"  [{page_num}] ⚠ Quality warnings")
+
+                if success:
+                    page_data = {
+                        "page": page_num,
+                        "prompt": prompt,
+                        "file": str(image_path.name),
+                        "quality_metrics": validation.get('metrics', {})
+                    }
+                    logger.info(f"  [{page_num}] ✓ Complete")
+
+        except Exception as e:
+            logger.error(f"  [{page_num}] ✗ Failed: {e}")
+            success = False
+
+        return (page_num, success, page_data)
+
+    def generate_book_parallel(self, theme: str, num_pages: int = 30,
+                              book_title: str = None,
+                              batch_size: Optional[int] = None) -> Path:
+        """Generate a coloring book with parallel processing.
+
+        Args:
+            theme: Theme name
+            num_pages: Number of pages to generate
+            book_title: Optional custom title
+            batch_size: Pages to generate concurrently (default: max_workers)
+
+        Returns:
+            Path to generated book directory
+        """
+        # PRE-FLIGHT CHECKS
+        if not preflight_checks(force_lineart=self.force_lineart):
+            raise RuntimeError("Pre-flight checks failed - cannot generate book safely")
+
+        if theme not in THEMES:
+            raise ValueError(f"Unknown theme: {theme}. Available: {list(THEMES.keys())}")
+
+        theme_data = THEMES[theme]
+        title = book_title or theme_data["name"]
+        safe_title = title.replace(" ", "_").replace(":", "")
+
+        # Create book directory
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        book_dir = self.output_dir / f"{safe_title}_{timestamp}"
+        book_dir.mkdir(parents=True, exist_ok=True)
+        images_dir = book_dir / "images"
+        images_dir.mkdir(exist_ok=True)
+
+        logger.info(f"Generating coloring book: {title}")
+        logger.info(f"Theme: {theme}, Pages: {num_pages}")
+        logger.info(f"Parallel workers: {self.max_workers}")
+        logger.info(f"Output: {book_dir}")
+
+        # Prepare prompts
+        prompts = theme_data["prompts"]
+        variations = [
+            "",
+            ", with extra fine details",
+            ", with bold thick lines",
+            ", with intricate background patterns",
+            ", centered composition",
+            ", full page design",
+        ]
+
+        page_prompts = []
+        for i in range(num_pages):
+            prompt = prompts[i % len(prompts)]
+            prompt += random.choice(variations)
+            page_prompts.append((i + 1, prompt))
+
+        # Generate pages in parallel batches
+        batch_size = batch_size or self.max_workers
+        generated = []
+        total_batches = (num_pages + batch_size - 1) // batch_size
+
+        logger.info(f"Processing in {total_batches} batch(es) of {batch_size} pages")
+
+        for batch_num in range(total_batches):
+            start_idx = batch_num * batch_size
+            end_idx = min(start_idx + batch_size, num_pages)
+            batch_items = page_prompts[start_idx:end_idx]
+
+            logger.info(f"\nBatch {batch_num + 1}/{total_batches}: Pages {start_idx + 1}-{end_idx}")
+
+            # Process batch in parallel
+            with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+                # Submit all tasks
+                futures = {
+                    executor.submit(self._generate_single_page, page_num, prompt, images_dir): page_num
+                    for page_num, prompt in batch_items
+                }
+
+                # Collect results as they complete
+                batch_results = []
+                for future in concurrent.futures.as_completed(futures):
+                    page_num, success, page_data = future.result()
+                    if success and page_data:
+                        batch_results.append(page_data)
+
+            # Sort by page number and add to generated list
+            batch_results.sort(key=lambda x: x['page'])
+            generated.extend(batch_results)
+
+            # Rate limiting between batches (not needed within batch)
+            if batch_num < total_batches - 1:
+                time.sleep(2)
+
+        # Save metadata
+        self._save_book_metadata(book_dir, title, theme, num_pages, generated, timestamp)
+
+        logger.info(f"\n{'='*70}")
+        logger.info(f"Generated {len(generated)}/{num_pages} pages")
+        logger.info(f"Book saved to: {book_dir}")
+        logger.info(f"{'='*70}")
+
+        return book_dir
+
+
+def main():
+    """Example usage of parallel generator."""
+    import argparse
+
+    parser = argparse.ArgumentParser(description='Generate coloring books in parallel')
+    parser.add_argument('--theme', required=True, choices=list(THEMES.keys()),
+                       help='Theme to generate')
+    parser.add_argument('--pages', type=int, default=30,
+                       help='Number of pages to generate')
+    parser.add_argument('--workers', type=int, default=3,
+                       help='Number of parallel workers (2-4 recommended)')
+    parser.add_argument('--title', help='Custom book title')
+    parser.add_argument('--backend', default='pollinations',
+                       choices=['pollinations', 'huggingface', 'replicate'],
+                       help='AI backend to use')
+    parser.add_argument('--lineart-method', default='enhanced',
+                       choices=['enhanced', 'standard', 'detailed'],
+                       help='Line art processing method')
+
+    args = parser.parse_args()
+
+    gen = ParallelColoringBookGenerator(
+        backend=args.backend,
+        force_lineart=True,
+        lineart_method=args.lineart_method,
+        max_workers=args.workers
+    )
+
+    book_dir = gen.generate_book_parallel(
+        theme=args.theme,
+        num_pages=args.pages,
+        book_title=args.title
+    )
+
+    print(f"\n✓ Book generated: {book_dir}")
+
+
+if __name__ == "__main__":
+    main()

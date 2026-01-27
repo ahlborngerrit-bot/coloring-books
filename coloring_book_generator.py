@@ -337,6 +337,136 @@ THEMES = {
             "word CREATE surrounded by artistic elements and patterns, adult coloring book style, clean lines",
         ]
     },
+    "ocean": {
+        "name": "Ocean Wonders",
+        "prompts": [
+            "detailed sea turtle swimming with decorative shell patterns, coral and seaweed around, adult coloring book page, intricate line art",
+            "jellyfish with flowing tentacles filled with zentangle patterns, underwater scene, coloring page, clean black outlines",
+            "ornate seahorse with intricate decorative patterns and bubbles, adult coloring book style, line drawing",
+            "octopus with detailed tentacles wrapped around coral, underwater garden, coloring page, black linework",
+            "tropical fish school with decorative scales and fins, coral reef background, adult coloring book, detailed outlines",
+            "dolphin jumping through waves with decorative patterns, ocean scene, coloring page, intricate line art",
+            "manta ray with ornate patterns gliding through water, seaweed and shells, adult coloring book style",
+            "whale breaching with decorative body patterns, ocean waves and sea life, coloring page, clean lines",
+        ]
+    },
+    "flowers": {
+        "name": "Blooming Gardens",
+        "prompts": [
+            "sunflower with intricate center pattern and detailed petals, adult coloring book page, black line art on white",
+            "rose garden with blooming roses, leaves and vines intertwining, detailed coloring page, clean outlines",
+            "lotus flower floating on water with lily pads and koi fish, adult coloring book style, intricate linework",
+            "cherry blossom branch with delicate flowers and decorative patterns, coloring page, detailed line art",
+            "tulip field with various tulips and decorative stems, adult coloring book, black linework on white",
+            "wildflower meadow with diverse flowers, butterflies and bees, coloring page, intricate patterns",
+            "peony bouquet with full blooms and ornate leaves, adult coloring book style, detailed outlines",
+            "orchid arrangement with elaborate blooms and decorative pots, coloring page, clean line art",
+        ]
+    },
+    "zen": {
+        "name": "Zen & Meditation",
+        "prompts": [
+            "buddha meditating surrounded by lotus flowers and ornate patterns, adult coloring book page, line art",
+            "zen garden with raked sand patterns, rocks and bonsai tree, detailed coloring page, clean outlines",
+            "yin yang symbol with decorative patterns and natural elements, adult coloring book style, intricate linework",
+            "meditation stones stacked with flowing water and bamboo, coloring page, detailed line art",
+            "om symbol surrounded by mandalas and spiritual patterns, adult coloring book, black linework",
+            "lotus mandala with layers of petals and sacred geometry, coloring page, intricate patterns",
+            "zen circle enso with decorative brush strokes and nature elements, adult coloring book style",
+            "chakra symbols with ornate patterns and energy flow designs, coloring page, detailed outlines",
+        ]
+    },
+    "christmas": {
+        "name": "Christmas Magic",
+        "prompts": [
+            "ornate Christmas tree with decorative ornaments, presents underneath, adult coloring book page, intricate line art",
+            "santa sleigh with reindeer flying through detailed snowy sky, coloring page, clean black outlines",
+            "gingerbread house covered in decorative icing patterns and candy, adult coloring book style, line drawing",
+            "snowflakes with intricate unique patterns, winter scene background, coloring page, detailed linework",
+            "christmas wreath with holly, pinecones and ornate ribbon bow, adult coloring book, black outlines",
+            "nutcracker soldier with decorative uniform and ornate details, coloring page, intricate line art",
+            "christmas stockings filled with presents, ornate patterns on fabric, adult coloring book style",
+            "angel with detailed wings and flowing robes, christmas decorations, coloring page, clean lines",
+        ]
+    },
+    "halloween": {
+        "name": "Halloween Spooky",
+        "prompts": [
+            "jack o lantern pumpkin with intricate carved face and decorative patterns, adult coloring book page, line art",
+            "haunted house with ornate victorian details, bats and full moon, coloring page, clean outlines",
+            "witch with elaborate pointed hat and flowing robe, broom and cauldron, adult coloring book style",
+            "sugar skull dia de muertos with intricate decorative patterns, coloring page, detailed linework",
+            "black cat sitting with ornate fur patterns, halloween decorations around, adult coloring book, black lines",
+            "spider web with detailed geometric pattern and decorative spiders, coloring page, intricate line art",
+            "owl perched on branch with halloween elements, full moon background, adult coloring book style",
+            "ghost floating through graveyard with ornate tombstones and trees, coloring page, detailed outlines",
+        ]
+    },
+    "celtic": {
+        "name": "Celtic Knots",
+        "prompts": [
+            "celtic trinity knot with intricate interwoven lines and patterns, adult coloring book page, line art",
+            "celtic cross with ornate knotwork and decorative details, coloring page, clean black outlines",
+            "celtic tree of life with intertwining branches and roots, adult coloring book style, intricate linework",
+            "celtic animals with knotwork patterns, dragons and birds intertwined, coloring page, detailed line art",
+            "celtic border pattern with continuous interlacing design, adult coloring book, black linework",
+            "celtic spiral triskele with decorative knotwork and symbols, coloring page, intricate patterns",
+            "celtic harp with ornate details and knotwork decorations, adult coloring book style",
+            "celtic shield with warrior symbols and interlaced borders, coloring page, detailed outlines",
+        ]
+    },
+    "japanese": {
+        "name": "Japanese Art",
+        "prompts": [
+            "koi fish swimming in pond with lotus flowers and decorative waves, adult coloring book page, line art",
+            "japanese cherry blossom tree with intricate branches and blooms, coloring page, clean outlines",
+            "geisha with ornate kimono patterns and elaborate hair decorations, adult coloring book style, detailed linework",
+            "pagoda temple with decorative rooflines and garden landscape, coloring page, intricate line art",
+            "japanese dragon with scales and flowing mane, clouds and waves, adult coloring book, black linework",
+            "origami crane with decorative fold patterns and traditional designs, coloring page, clean lines",
+            "samurai mask with ornate details and warrior symbols, adult coloring book style, intricate patterns",
+            "bamboo forest with detailed stalks and leaves, zen garden elements, coloring page, line art",
+        ]
+    },
+    "space": {
+        "name": "Cosmic Dreams",
+        "prompts": [
+            "solar system with detailed planets, stars and orbital patterns, adult coloring book page, intricate line art",
+            "astronaut floating in space with decorative suit patterns, stars and galaxies, coloring page, clean outlines",
+            "moon phases with ornate lunar surface details and celestial patterns, adult coloring book style, linework",
+            "constellation patterns with connected stars forming mythical creatures, coloring page, detailed line art",
+            "rocket ship launching with decorative hull designs and flame patterns, adult coloring book, black lines",
+            "alien landscape with strange plants and celestial sky, coloring page, intricate patterns",
+            "galaxy spiral with swirling stars and cosmic dust patterns, adult coloring book style, detailed outlines",
+            "space station with ornate technological details and satellite arrays, coloring page, clean line art",
+        ]
+    },
+    "food": {
+        "name": "Delicious Treats",
+        "prompts": [
+            "cupcakes with intricate frosting swirls and decorative toppings, adult coloring book page, line art",
+            "ice cream cones with ornate patterns and multiple flavors stacked, coloring page, clean black outlines",
+            "donuts with decorative icing patterns and sprinkles, adult coloring book style, detailed linework",
+            "macarons arranged with elaborate filling patterns and decorations, coloring page, intricate line art",
+            "cake layers with ornate frosting designs and decorative elements, adult coloring book, black linework",
+            "cookies with detailed icing patterns and decorative shapes, coloring page, clean lines",
+            "candy jar filled with various sweets, ornate glass patterns, adult coloring book style, intricate details",
+            "chocolate box with elaborate chocolates, decorative wrappers and bows, coloring page, line art",
+        ]
+    },
+    "architecture": {
+        "name": "Beautiful Buildings",
+        "prompts": [
+            "gothic cathedral with intricate stained glass windows and ornate spires, adult coloring book page, line art",
+            "victorian mansion with detailed gingerbread trim and wraparound porch, coloring page, clean outlines",
+            "taj mahal with ornate domes and decorative archways, reflecting pool, adult coloring book style, linework",
+            "eiffel tower with intricate ironwork lattice patterns and parisian skyline, coloring page, detailed line art",
+            "lighthouse on cliff with decorative stonework and crashing waves, adult coloring book, black linework",
+            "windmill with ornate blades and dutch countryside landscape, coloring page, intricate patterns",
+            "castle with detailed towers, battlements and decorative stonework, adult coloring book style, clean lines",
+            "bridge with elaborate suspension cables and architectural details, coloring page, intricate line art",
+        ]
+    },
 }
 
 # Removed controversial themes for production use
