@@ -23,12 +23,14 @@ Usage:
 import concurrent.futures
 from typing import Tuple, Optional
 from pathlib import Path
+from datetime import datetime
 import time
 import random
 
 from coloring_book_generator import (
     ColoringBookGenerator,
     THEMES,
+    PROMPT_VARIATIONS,
     logger,
     preflight_checks,
     validate_image_quality
@@ -50,8 +52,19 @@ class ParallelColoringBookGenerator(ColoringBookGenerator):
             lineart_method: Line art processing method
             max_workers: Maximum concurrent workers (default: 3)
                         Recommended: 2-4 to avoid rate limiting
+
+        Raises:
+            ValueError: If max_workers is less than 1
         """
         super().__init__(output_dir, backend, force_lineart, lineart_method)
+
+        # Validate max_workers
+        if max_workers < 1:
+            raise ValueError(f"max_workers must be >= 1, got {max_workers}")
+        if max_workers > 10:
+            logger.warning(f"max_workers={max_workers} is very high, may cause rate limiting")
+            logger.warning("Recommended: 2-4 workers for most APIs")
+
         self.max_workers = max_workers
 
     def _generate_single_page(self, page_num: int, prompt: str,
@@ -73,20 +86,8 @@ class ParallelColoringBookGenerator(ColoringBookGenerator):
         try:
             logger.info(f"  [{page_num}] Generating...")
 
-            # Generate based on backend
-            if self.backend == "pollinations":
-                image_bytes = self.generate_image_pollinations(prompt, size=(1536, 1536))
-            elif self.backend == "huggingface":
-                image_bytes = self.generate_image_huggingface(prompt)
-            else:  # replicate
-                image_url = self.generate_image_replicate(prompt)
-                if image_url:
-                    if self.download_image(image_url, image_path):
-                        image_bytes = image_path.read_bytes()
-                    else:
-                        image_bytes = None
-                else:
-                    image_bytes = None
+            # Generate image using centralized backend logic (shared with main generator)
+            image_bytes = self._generate_image_bytes(prompt, size=(1536, 1536))
 
             if image_bytes:
                 # Post-process (upscale and/or line art)
@@ -150,7 +151,6 @@ class ParallelColoringBookGenerator(ColoringBookGenerator):
         safe_title = title.replace(" ", "_").replace(":", "")
 
         # Create book directory
-        from datetime import datetime
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         book_dir = self.output_dir / f"{safe_title}_{timestamp}"
         book_dir.mkdir(parents=True, exist_ok=True)
@@ -162,21 +162,13 @@ class ParallelColoringBookGenerator(ColoringBookGenerator):
         logger.info(f"Parallel workers: {self.max_workers}")
         logger.info(f"Output: {book_dir}")
 
-        # Prepare prompts
+        # Prepare prompts with shared variations
         prompts = theme_data["prompts"]
-        variations = [
-            "",
-            ", with extra fine details",
-            ", with bold thick lines",
-            ", with intricate background patterns",
-            ", centered composition",
-            ", full page design",
-        ]
 
         page_prompts = []
         for i in range(num_pages):
             prompt = prompts[i % len(prompts)]
-            prompt += random.choice(variations)
+            prompt += random.choice(PROMPT_VARIATIONS)
             page_prompts.append((i + 1, prompt))
 
         # Generate pages in parallel batches

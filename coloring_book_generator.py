@@ -32,6 +32,21 @@ MIN_PRINT_HEIGHT = 3300  # 11" at 300 DPI
 REQUIRED_DPI = 300
 MAX_ACCEPTABLE_COLORS = 2  # For line art (black & white only)
 
+# Image Quality Constants
+MIN_FILE_SIZE_BYTES = 10_000  # 10KB - smaller indicates generation issue
+MAX_FILE_SIZE_BYTES = 10_000_000  # 10MB - larger may cause upload issues
+RATE_LIMIT_DELAY_SECONDS = 2  # Delay between API calls to avoid rate limiting
+
+# Prompt Variations (shared between generators)
+PROMPT_VARIATIONS = [
+    "",
+    ", with extra fine details",
+    ", with bold thick lines",
+    ", with intricate background patterns",
+    ", centered composition",
+    ", full page design",
+]
+
 # API Keys (set via environment variable)
 REPLICATE_API_TOKEN = os.environ.get("REPLICATE_API_TOKEN")
 HF_TOKEN = os.environ.get("HF_TOKEN")
@@ -169,10 +184,14 @@ def validate_image_quality(image_path: Path,
         file_size = image_path.stat().st_size
         results['metrics']['file_size_kb'] = file_size / 1024
 
-        if file_size < 10000:  # Less than 10KB is suspiciously small
-            results['warnings'].append("File size very small, may indicate generation issue")
-        elif file_size > 10_000_000:  # More than 10MB
-            results['warnings'].append("File size very large, may cause upload issues")
+        if file_size < MIN_FILE_SIZE_BYTES:
+            results['warnings'].append(
+                f"File size very small ({file_size/1024:.1f}KB), may indicate generation issue"
+            )
+        elif file_size > MAX_FILE_SIZE_BYTES:
+            results['warnings'].append(
+                f"File size very large ({file_size/1024/1024:.1f}MB), may cause upload issues"
+            )
 
         # Log validation summary
         if results['valid'] and not results['warnings']:
@@ -260,291 +279,55 @@ def preflight_checks(force_lineart: bool = False) -> bool:
 
 # ==================== END QUALITY ASSURANCE FUNCTIONS ====================
 
-# Coloring Book Themes with Prompts
-THEMES = {
-    "mandalas": {
-        "name": "Mystical Mandalas",
-        "prompts": [
-            "intricate mandala pattern with geometric shapes and floral elements, black line art on white background, adult coloring book page, highly detailed symmetrical design",
-            "zen mandala with lotus flowers and sacred geometry, clean black outlines on white, coloring page style, no shading",
-            "celestial mandala with sun moon and stars pattern, detailed line drawing, adult coloring book, white background",
-            "nature mandala with leaves vines and flowers, circular symmetrical design, black linework coloring page",
-            "tribal mandala with ethnic patterns and symbols, intricate black line art, coloring book style",
-        ]
-    },
-    "animals": {
-        "name": "Enchanted Animals",
-        "prompts": [
-            "majestic lion portrait with decorative mane made of intricate patterns and flowers, adult coloring book style, black line art on white",
-            "owl with ornate feathers filled with zentangle patterns, detailed coloring page, clean black outlines",
-            "elephant decorated with mandala and paisley patterns, adult coloring book page, intricate line art",
-            "wolf howling at moon with tribal patterns in fur, detailed line drawing for coloring, white background",
-            "butterfly with intricate wing patterns and floral designs, adult coloring page, black linework",
-            "peacock with elaborate tail feathers in zentangle style, coloring book art, detailed outlines",
-            "fox with decorative fur patterns and nature elements, adult coloring page, clean lines",
-            "horse with flowing mane filled with swirls and patterns, line art coloring page, intricate design",
-        ]
-    },
-    "nature": {
-        "name": "Botanical Gardens",
-        "prompts": [
-            "tropical flowers and leaves arrangement, detailed botanical illustration, adult coloring book style, black line art",
-            "enchanted forest scene with mushrooms ferns and flowers, intricate line drawing for coloring, white background",
-            "underwater coral reef with fish and sea plants, detailed coloring page, clean black outlines",
-            "garden scene with roses lilies and vines, botanical coloring book page, intricate linework",
-            "tree of life with detailed bark leaves and roots, adult coloring page, ornate line art",
-            "succulent garden arrangement, detailed botanical drawing, coloring book style, clean lines",
-        ]
-    },
-    "geometric": {
-        "name": "Sacred Geometry",
-        "prompts": [
-            "complex geometric pattern with interlocking shapes, adult coloring book page, precise black line art on white",
-            "optical illusion geometric design, intricate repeating pattern, coloring page style, clean outlines",
-            "3D geometric tessellation pattern, adult coloring book, detailed line art, white background",
-            "art deco geometric pattern with symmetrical design, coloring page, black linework",
-            "islamic geometric tile pattern, intricate arabesque design, adult coloring book style",
-        ]
-    },
-    "fantasy": {
-        "name": "Fantasy Realms",
-        "prompts": [
-            "fairy sitting on mushroom in enchanted forest, intricate details, adult coloring book page, line art",
-            "dragon with ornate scales and decorative patterns, detailed coloring page, black outlines on white",
-            "mermaid with flowing hair and detailed tail patterns, adult coloring book style, line drawing",
-            "unicorn with decorated mane and magical elements, intricate coloring page, clean black lines",
-            "castle in clouds with fantasy landscape, detailed line art for coloring, adult coloring book",
-            "phoenix rising with elaborate feather patterns, coloring book page, intricate linework",
-        ]
-    },
-    "patterns": {
-        "name": "Relaxing Patterns",
-        "prompts": [
-            "paisley pattern with intricate swirls and details, adult coloring book page, black line art on white",
-            "zentangle abstract pattern with various textures, detailed coloring page, clean outlines",
-            "damask wallpaper pattern, ornate repeating design, adult coloring book style, line art",
-            "moroccan tile pattern with geometric and floral elements, coloring page, intricate lines",
-            "art nouveau flowing pattern with organic curves, adult coloring book, detailed linework",
-        ]
-    },
-    "inspirational": {
-        "name": "Mindful Words",
-        "prompts": [
-            "word BREATHE surrounded by decorative swirls flowers and patterns, adult coloring book page, line art",
-            "word PEACE with mandala and nature elements around it, coloring page style, intricate outlines",
-            "word LOVE decorated with hearts flowers and ornate patterns, adult coloring book, black lines",
-            "word DREAM with clouds stars and whimsical designs, coloring page, detailed line art",
-            "word CREATE surrounded by artistic elements and patterns, adult coloring book style, clean lines",
-        ]
-    },
-    "ocean": {
-        "name": "Ocean Wonders",
-        "prompts": [
-            "detailed sea turtle swimming with decorative shell patterns, coral and seaweed around, adult coloring book page, intricate line art",
-            "jellyfish with flowing tentacles filled with zentangle patterns, underwater scene, coloring page, clean black outlines",
-            "ornate seahorse with intricate decorative patterns and bubbles, adult coloring book style, line drawing",
-            "octopus with detailed tentacles wrapped around coral, underwater garden, coloring page, black linework",
-            "tropical fish school with decorative scales and fins, coral reef background, adult coloring book, detailed outlines",
-            "dolphin jumping through waves with decorative patterns, ocean scene, coloring page, intricate line art",
-            "manta ray with ornate patterns gliding through water, seaweed and shells, adult coloring book style",
-            "whale breaching with decorative body patterns, ocean waves and sea life, coloring page, clean lines",
-        ]
-    },
-    "flowers": {
-        "name": "Blooming Gardens",
-        "prompts": [
-            "sunflower with intricate center pattern and detailed petals, adult coloring book page, black line art on white",
-            "rose garden with blooming roses, leaves and vines intertwining, detailed coloring page, clean outlines",
-            "lotus flower floating on water with lily pads and koi fish, adult coloring book style, intricate linework",
-            "cherry blossom branch with delicate flowers and decorative patterns, coloring page, detailed line art",
-            "tulip field with various tulips and decorative stems, adult coloring book, black linework on white",
-            "wildflower meadow with diverse flowers, butterflies and bees, coloring page, intricate patterns",
-            "peony bouquet with full blooms and ornate leaves, adult coloring book style, detailed outlines",
-            "orchid arrangement with elaborate blooms and decorative pots, coloring page, clean line art",
-        ]
-    },
-    "zen": {
-        "name": "Zen & Meditation",
-        "prompts": [
-            "buddha meditating surrounded by lotus flowers and ornate patterns, adult coloring book page, line art",
-            "zen garden with raked sand patterns, rocks and bonsai tree, detailed coloring page, clean outlines",
-            "yin yang symbol with decorative patterns and natural elements, adult coloring book style, intricate linework",
-            "meditation stones stacked with flowing water and bamboo, coloring page, detailed line art",
-            "om symbol surrounded by mandalas and spiritual patterns, adult coloring book, black linework",
-            "lotus mandala with layers of petals and sacred geometry, coloring page, intricate patterns",
-            "zen circle enso with decorative brush strokes and nature elements, adult coloring book style",
-            "chakra symbols with ornate patterns and energy flow designs, coloring page, detailed outlines",
-        ]
-    },
-    "christmas": {
-        "name": "Christmas Magic",
-        "prompts": [
-            "ornate Christmas tree with decorative ornaments, presents underneath, adult coloring book page, intricate line art",
-            "santa sleigh with reindeer flying through detailed snowy sky, coloring page, clean black outlines",
-            "gingerbread house covered in decorative icing patterns and candy, adult coloring book style, line drawing",
-            "snowflakes with intricate unique patterns, winter scene background, coloring page, detailed linework",
-            "christmas wreath with holly, pinecones and ornate ribbon bow, adult coloring book, black outlines",
-            "nutcracker soldier with decorative uniform and ornate details, coloring page, intricate line art",
-            "christmas stockings filled with presents, ornate patterns on fabric, adult coloring book style",
-            "angel with detailed wings and flowing robes, christmas decorations, coloring page, clean lines",
-        ]
-    },
-    "halloween": {
-        "name": "Halloween Spooky",
-        "prompts": [
-            "jack o lantern pumpkin with intricate carved face and decorative patterns, adult coloring book page, line art",
-            "haunted house with ornate victorian details, bats and full moon, coloring page, clean outlines",
-            "witch with elaborate pointed hat and flowing robe, broom and cauldron, adult coloring book style",
-            "sugar skull dia de muertos with intricate decorative patterns, coloring page, detailed linework",
-            "black cat sitting with ornate fur patterns, halloween decorations around, adult coloring book, black lines",
-            "spider web with detailed geometric pattern and decorative spiders, coloring page, intricate line art",
-            "owl perched on branch with halloween elements, full moon background, adult coloring book style",
-            "ghost floating through graveyard with ornate tombstones and trees, coloring page, detailed outlines",
-        ]
-    },
-    "celtic": {
-        "name": "Celtic Knots",
-        "prompts": [
-            "celtic trinity knot with intricate interwoven lines and patterns, adult coloring book page, line art",
-            "celtic cross with ornate knotwork and decorative details, coloring page, clean black outlines",
-            "celtic tree of life with intertwining branches and roots, adult coloring book style, intricate linework",
-            "celtic animals with knotwork patterns, dragons and birds intertwined, coloring page, detailed line art",
-            "celtic border pattern with continuous interlacing design, adult coloring book, black linework",
-            "celtic spiral triskele with decorative knotwork and symbols, coloring page, intricate patterns",
-            "celtic harp with ornate details and knotwork decorations, adult coloring book style",
-            "celtic shield with warrior symbols and interlaced borders, coloring page, detailed outlines",
-        ]
-    },
-    "japanese": {
-        "name": "Japanese Art",
-        "prompts": [
-            "koi fish swimming in pond with lotus flowers and decorative waves, adult coloring book page, line art",
-            "japanese cherry blossom tree with intricate branches and blooms, coloring page, clean outlines",
-            "geisha with ornate kimono patterns and elaborate hair decorations, adult coloring book style, detailed linework",
-            "pagoda temple with decorative rooflines and garden landscape, coloring page, intricate line art",
-            "japanese dragon with scales and flowing mane, clouds and waves, adult coloring book, black linework",
-            "origami crane with decorative fold patterns and traditional designs, coloring page, clean lines",
-            "samurai mask with ornate details and warrior symbols, adult coloring book style, intricate patterns",
-            "bamboo forest with detailed stalks and leaves, zen garden elements, coloring page, line art",
-        ]
-    },
-    "space": {
-        "name": "Cosmic Dreams",
-        "prompts": [
-            "solar system with detailed planets, stars and orbital patterns, adult coloring book page, intricate line art",
-            "astronaut floating in space with decorative suit patterns, stars and galaxies, coloring page, clean outlines",
-            "moon phases with ornate lunar surface details and celestial patterns, adult coloring book style, linework",
-            "constellation patterns with connected stars forming mythical creatures, coloring page, detailed line art",
-            "rocket ship launching with decorative hull designs and flame patterns, adult coloring book, black lines",
-            "alien landscape with strange plants and celestial sky, coloring page, intricate patterns",
-            "galaxy spiral with swirling stars and cosmic dust patterns, adult coloring book style, detailed outlines",
-            "space station with ornate technological details and satellite arrays, coloring page, clean line art",
-        ]
-    },
-    "food": {
-        "name": "Delicious Treats",
-        "prompts": [
-            "cupcakes with intricate frosting swirls and decorative toppings, adult coloring book page, line art",
-            "ice cream cones with ornate patterns and multiple flavors stacked, coloring page, clean black outlines",
-            "donuts with decorative icing patterns and sprinkles, adult coloring book style, detailed linework",
-            "macarons arranged with elaborate filling patterns and decorations, coloring page, intricate line art",
-            "cake layers with ornate frosting designs and decorative elements, adult coloring book, black linework",
-            "cookies with detailed icing patterns and decorative shapes, coloring page, clean lines",
-            "candy jar filled with various sweets, ornate glass patterns, adult coloring book style, intricate details",
-            "chocolate box with elaborate chocolates, decorative wrappers and bows, coloring page, line art",
-        ]
-    },
-    "architecture": {
-        "name": "Beautiful Buildings",
-        "prompts": [
-            "gothic cathedral with intricate stained glass windows and ornate spires, adult coloring book page, line art",
-            "victorian mansion with detailed gingerbread trim and wraparound porch, coloring page, clean outlines",
-            "taj mahal with ornate domes and decorative archways, reflecting pool, adult coloring book style, linework",
-            "eiffel tower with intricate ironwork lattice patterns and parisian skyline, coloring page, detailed line art",
-            "lighthouse on cliff with decorative stonework and crashing waves, adult coloring book, black linework",
-            "windmill with ornate blades and dutch countryside landscape, coloring page, intricate patterns",
-            "castle with detailed towers, battlements and decorative stonework, adult coloring book style, clean lines",
-            "bridge with elaborate suspension cables and architectural details, coloring page, intricate line art",
-        ]
-    },
-}
+# ==================== THEME LOADING ====================
 
-# Removed controversial themes for production use
-"""
-ARCHIVED_THEMES = {
-    "maga_rally": {
-        "name": "MAGA Rally Warriors",
-        "prompts": [
-            # SINGLE CHARACTER - Obese scooter riders (BOLD & EASY style)
-            "single morbidly obese man on mobility scooter, huge round belly, red MAGA hat, american flag cape, very thick black outlines, large simple shapes, minimal detail, bold and easy coloring book style, white background, no shading",
-            "one very fat woman on electric scooter, massive body overflowing seat, flag shirt stretched tight, oxygen tank attached, extra thick outlines, big simple areas to color, minimalist coloring page",
-            "single obese person on decorated scooter with multiple flags, huge belly resting on handlebars, red hat, thick bold black lines, large fill areas, simple shapes only, easy coloring book",
+def load_themes(themes_file: Path = None) -> Dict[str, Dict]:
+    """Load coloring book themes from JSON file.
 
-            # SINGLE CHARACTER - Gaunt/meth-head types (BOLD & EASY style)
-            "single very skinny gaunt man, hollow cheeks, missing teeth showing, stringy hair, oversized MAGA shirt hanging on bony frame, extra thick outlines, simple shapes, bold easy coloring page, white background",
-            "one skeletal thin woman with sunken face, bad teeth visible, cigarette, too-big red hat on small head, flag tank top on bony shoulders, thick black lines, large areas to color, minimal detail",
-            "single emaciated man with visible cheekbones, toothless grin, scraggly beard, holding american flag, very thick outlines, simple bold shapes, easy coloring book style",
+    Args:
+        themes_file: Path to themes JSON file (default: themes/themes.json)
 
-            # SINGLE CHARACTER - Biker/militia types (BOLD & EASY style)
-            "single large biker man with leather vest covered in patches, big beer belly, long beard, bandana, american flag, extra thick black outlines, simple shapes, bold easy coloring page",
-            "one man in tactical vest and camo pants, beer gut, red MAGA hat, holding flag, thick bold outlines, large simple areas, minimal detail coloring book style",
-            "single bearded man in patriot militia costume, tactical gear on fat body, american flag cape, very thick lines, big simple shapes to color, white background",
+    Returns:
+        Dictionary of themes
 
-            # SINGLE CHARACTER - QAnon Shaman type (BOLD & EASY style)
-            "single shirtless man with horned fur hat like viking, face paint, holding flag on pole, round belly, thick black outlines, large simple shapes, bold easy coloring book, minimal detail",
-            "one person in homemade patriot superhero costume, cape made of flag, face paint, big body, extra thick outlines, simple bold shapes, easy coloring page style",
-            "single man dressed as Uncle Sam but trashy version, tall striped hat, flag suit too tight on fat body, thick lines, large areas to color, minimalist design",
+    Raises:
+        FileNotFoundError: If themes file not found
+        json.JSONDecodeError: If themes file is invalid
+    """
+    if themes_file is None:
+        # Default to themes/themes.json relative to this file
+        script_dir = Path(__file__).parent
+        themes_file = script_dir / "themes" / "themes.json"
 
-            # TWO CHARACTERS - Contrast pairs (BOLD & EASY style)
-            "two trump supporters side by side, one morbidly obese one skeleton thin, both in flag clothing and red hats, very thick outlines, large simple shapes, bold easy coloring book",
-            "pair of rally goers, fat man on scooter next to gaunt skinny woman with cane, both toothless smiles, flags, extra thick black lines, simple shapes, minimal detail",
-            "two people at rally, obese woman and emaciated man, mismatched couple in matching MAGA hats, thick bold outlines, big areas to color, easy coloring page",
+    if not themes_file.exists():
+        logger.error(f"Themes file not found: {themes_file}")
+        raise FileNotFoundError(f"Themes file not found: {themes_file}")
 
-            # RALLY STAGE SCENE - Simple (BOLD & EASY style)
-            "simple trump rally stage with podium and big TRUMP sign, two flags on sides, jumbotron screen, very thick outlines, large shapes, minimal detail, bold easy coloring book style",
-            "basic rally stage setup, podium center, american flags behind, simple crowd silhouettes below, extra thick black lines, big simple areas to color, minimalist",
+    try:
+        with open(themes_file, 'r') as f:
+            themes = json.load(f)
+        logger.debug(f"Loaded {len(themes)} themes from {themes_file}")
+        return themes
+    except json.JSONDecodeError as e:
+        logger.error(f"Invalid JSON in themes file: {e}")
+        raise
 
-            # PICKUP TRUCK SCENE (BOLD & EASY style)
-            "single pickup truck covered in trump flags and stickers, obese driver visible, thick black outlines, large simple shapes, minimal detail, bold easy coloring page",
-            "one big truck with flags in bed, gaunt skinny person standing in back waving flag, very thick lines, simple shapes only, easy coloring book style",
-            "pickup truck tailgate scene, cooler and lawn chair, one fat person sitting one thin person standing, flags everywhere, thick bold outlines, large areas",
 
-            # MERCHANDISE BOOTH - Simple (BOLD & EASY style)
-            "simple merchandise table with red hats and flags displayed, one trashy looking vendor, thick black outlines, large shapes, minimal detail coloring book",
-            "single booth selling trump merch, obese customer and thin vendor, table with hats, extra thick lines, big simple areas to color, bold easy style",
+# Load themes at module level
+try:
+    THEMES = load_themes()
+except FileNotFoundError:
+    logger.warning("Themes file not found, using empty themes dict")
+    THEMES = {}
+except Exception as e:
+    logger.warning(f"Error loading themes: {e}, using empty themes dict")
+    THEMES = {}
 
-            # FOOD SCENE - Simple (BOLD & EASY style)
-            "single obese person eating giant turkey leg at rally, grease on face, flag shirt, very thick outlines, large simple shapes, minimal detail, easy coloring page",
-            "one fat man with huge belly holding corn dog and giant soda, red hat, mustard stains, thick bold black lines, simple shapes, coloring book style",
-            "gaunt thin person at concession stand, hollow face, buying hot dog, simple booth behind, extra thick outlines, large areas to color, minimal detail",
+# ==================== END THEME LOADING ====================
 
-            # SCOOTER PARADE - Simple (BOLD & EASY style)
-            "three mobility scooters in row, each with obese rider, flags on each scooter, very thick black outlines, large simple shapes, bold easy coloring book, white background",
-            "line of scooters with fat people, simple side view, flags waving, thick bold lines, big areas to fill, minimal detail, easy coloring page style",
+# Legacy theme data replaced with JSON configuration
+# THEMES dictionary moved to themes/themes.json for easier maintenance
 
-            # WAITING IN LINE - Simple (BOLD & EASY style)
-            "three people waiting in line, one fat one thin one medium, all in flag clothing, lawn chairs, cooler, thick outlines, simple shapes, bold easy coloring book",
-            "simple line of rally goers, mix of body types, red hats, porta potty in background, very thick black lines, large areas to color, minimal detail",
-
-            # FAMILY PORTRAIT - Simple (BOLD & EASY style)
-            "trump supporter family of three, obese parents thin kid, matching flag shirts, red hats, thick black outlines, large simple shapes, bold easy coloring page",
-            "trashy family at rally, grandma on scooter, fat dad, skinny mom, toothless smiles, flags, extra thick lines, simple shapes, minimal detail coloring book",
-
-            # ARENA CROWD - Simplified (BOLD & EASY style)
-            "simple arena scene, stage in back with TRUMP sign, rows of red hats as simple circles, few detailed people in front row mix of fat and thin, thick outlines, large shapes",
-            "basic rally crowd from behind, sea of simple round heads with red hats, stage with flags in distance, very thick black lines, minimal detail, easy to color",
-
-            # MORE SINGLE CHARACTERS (BOLD & EASY style)
-            "single fat shirtless man at rally, huge hairy belly, sunburn, red hat, holding flag, very thick outlines, large simple shapes, bold easy coloring book style",
-            "one obese woman in flag bikini top, big belly over shorts, bad teeth smile, holding sign, thick black lines, simple shapes, minimal detail coloring page",
-            "single gaunt old man with oxygen tank, flag hospital gown, toothless, holding small flag, extra thick outlines, large areas to color, easy coloring book",
-            "one thin unhealthy woman with stringy hair, cigarette, flag dress hanging loose, hollow cheeks, thick bold lines, simple shapes, minimal detail",
-            "single large man in too-small flag speedo, big belly, red hat, hairy chest, very thick outlines, large simple shapes, bold easy coloring page style",
-            "one skeletal person wrapped in flag like toga, bones showing, toothless grin, thick black lines, big simple areas, minimal detail coloring book",
-        ]
-    },
-}
-"""
 
 
 class ColoringBookGenerator:
@@ -969,6 +752,40 @@ class ColoringBookGenerator:
             logger.error(f"Error downloading image: {e}")
         return False
 
+    def _generate_image_bytes(self, prompt: str, size: tuple = (1536, 1536)) -> Optional[bytes]:
+        """Generate image bytes using configured backend.
+
+        Centralized backend selection logic shared between generators.
+
+        Args:
+            prompt: Image generation prompt
+            size: Image size tuple (width, height)
+
+        Returns:
+            Image bytes on success, None on failure
+        """
+        if self.backend == "pollinations":
+            return self.generate_image_pollinations(prompt, size=size)
+        elif self.backend == "huggingface":
+            return self.generate_image_huggingface(prompt)
+        else:  # replicate
+            import tempfile
+            import uuid
+            image_url = self.generate_image_replicate(prompt)
+            if image_url:
+                # Download to temp file then read bytes
+                temp_path = Path(tempfile.gettempdir()) / f"temp_{uuid.uuid4()}.png"
+                try:
+                    if self.download_image(image_url, temp_path):
+                        image_bytes = temp_path.read_bytes()
+                        temp_path.unlink()  # Clean up
+                        return image_bytes
+                except Exception as e:
+                    logger.error(f"Error reading temp image: {e}")
+                    if temp_path.exists():
+                        temp_path.unlink()
+            return None
+
     def _post_process_image(self, image_bytes: bytes) -> bytes:
         """Post-process image (upscaling and/or line art).
 
@@ -1043,47 +860,21 @@ class ColoringBookGenerator:
         for i in range(num_pages):
             prompt = prompts[i % len(prompts)]
 
-            # Add variety
-            variations = [
-                "",
-                ", with extra fine details",
-                ", with bold thick lines",
-                ", with intricate background patterns",
-                ", centered composition",
-                ", full page design",
-            ]
-            prompt += random.choice(variations)
+            # Add variety using shared variations
+            prompt += random.choice(PROMPT_VARIATIONS)
 
             logger.info(f"Generating page {i+1}/{num_pages}...")
 
             image_path = images_dir / f"page_{i+1:03d}.png"
             success = False
 
-            if self.backend == "pollinations":
-                # Pollinations.ai - completely free, no API key
-                # Request larger size for better print quality (will scale to 2550x3300 if needed)
-                image_bytes = self.generate_image_pollinations(prompt, size=(1536, 1536))
-                if image_bytes:
-                    image_bytes = self._post_process_image(image_bytes)
-                    image_path.write_bytes(image_bytes)
-                    success = True
-            elif self.backend == "huggingface":
-                # HuggingFace returns image bytes directly
-                image_bytes = self.generate_image_huggingface(prompt)
-                if image_bytes:
-                    image_bytes = self._post_process_image(image_bytes)
-                    image_path.write_bytes(image_bytes)
-                    success = True
-            else:
-                # Replicate returns a URL
-                image_url = self.generate_image_replicate(prompt)
-                if image_url:
-                    success = self.download_image(image_url, image_path)
-                    if success:
-                        # Post-process downloaded image
-                        img_bytes = image_path.read_bytes()
-                        processed = self._post_process_image(img_bytes)
-                        image_path.write_bytes(processed)
+            # Generate image using centralized backend logic
+            image_bytes = self._generate_image_bytes(prompt, size=(1536, 1536))
+            if image_bytes:
+                # Post-process (upscale and/or convert to line art)
+                image_bytes = self._post_process_image(image_bytes)
+                image_path.write_bytes(image_bytes)
+                success = True
 
             if success:
                 # QUALITY ASSURANCE: Validate the generated image
