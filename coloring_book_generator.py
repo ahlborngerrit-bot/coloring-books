@@ -839,6 +839,48 @@ class ColoringBookGenerator:
             logger.error(f"Error downloading image: {e}")
         return False
 
+    def _post_process_image(self, image_bytes: bytes) -> bytes:
+        """Post-process image (upscaling and/or line art).
+
+        Extracted helper method to reduce code duplication.
+
+        Args:
+            image_bytes: Raw image bytes from generation
+
+        Returns:
+            Processed image bytes
+        """
+        if self.force_lineart:
+            return self.convert_to_coloring_page(image_bytes, method=self.lineart_method)
+        else:
+            return self.upscale_to_print_quality(image_bytes)
+
+    def _save_book_metadata(self, book_dir: Path, title: str, theme: str,
+                           num_pages: int, generated_pages: list, timestamp: str):
+        """Save book metadata to JSON file.
+
+        Extracted helper method for better organization.
+
+        Args:
+            book_dir: Book directory path
+            title: Book title
+            theme: Theme name
+            num_pages: Total pages requested
+            generated_pages: List of successfully generated pages
+            timestamp: Generation timestamp
+        """
+        metadata = {
+            "title": title,
+            "theme": theme,
+            "pages": num_pages,
+            "generated": len(generated_pages),
+            "timestamp": timestamp,
+            "pages_data": generated_pages
+        }
+
+        metadata_file = book_dir / "metadata.json"
+        metadata_file.write_text(json.dumps(metadata, indent=2))
+
     def generate_book(self, theme: str, num_pages: int = 30, book_title: str = None) -> Path:
         """Generate a complete coloring book."""
 
@@ -892,23 +934,14 @@ class ColoringBookGenerator:
                 # Request larger size for better print quality (will scale to 2550x3300 if needed)
                 image_bytes = self.generate_image_pollinations(prompt, size=(1536, 1536))
                 if image_bytes:
-                    if self.force_lineart:
-                        image_bytes = self.convert_to_coloring_page(image_bytes, method=self.lineart_method)
-                    else:
-                        # Still upscale to print quality even without line art processing
-                        image_bytes = self.upscale_to_print_quality(image_bytes)
+                    image_bytes = self._post_process_image(image_bytes)
                     image_path.write_bytes(image_bytes)
                     success = True
             elif self.backend == "huggingface":
                 # HuggingFace returns image bytes directly
                 image_bytes = self.generate_image_huggingface(prompt)
                 if image_bytes:
-                    # Apply line art conversion if enabled
-                    if self.force_lineart:
-                        image_bytes = self.convert_to_coloring_page(image_bytes, method=self.lineart_method)
-                    else:
-                        # Upscale to print quality even without line art processing
-                        image_bytes = self.upscale_to_print_quality(image_bytes)
+                    image_bytes = self._post_process_image(image_bytes)
                     image_path.write_bytes(image_bytes)
                     success = True
             else:
@@ -916,16 +949,11 @@ class ColoringBookGenerator:
                 image_url = self.generate_image_replicate(prompt)
                 if image_url:
                     success = self.download_image(image_url, image_path)
-                    # Apply line art conversion if enabled
-                    if success and self.force_lineart:
+                    if success:
+                        # Post-process downloaded image
                         img_bytes = image_path.read_bytes()
-                        converted = self.convert_to_coloring_page(img_bytes, method=self.lineart_method)
-                        image_path.write_bytes(converted)
-                    elif success:
-                        # Upscale to print quality even without line art processing
-                        img_bytes = image_path.read_bytes()
-                        upscaled = self.upscale_to_print_quality(img_bytes)
-                        image_path.write_bytes(upscaled)
+                        processed = self._post_process_image(img_bytes)
+                        image_path.write_bytes(processed)
 
             if success:
                 # QUALITY ASSURANCE: Validate the generated image
@@ -962,18 +990,8 @@ class ColoringBookGenerator:
             # Rate limiting
             time.sleep(2)
 
-        # Save metadata
-        metadata = {
-            "title": title,
-            "theme": theme,
-            "pages": num_pages,
-            "generated": len(generated),
-            "timestamp": timestamp,
-            "pages_data": generated
-        }
-
-        metadata_file = book_dir / "metadata.json"
-        metadata_file.write_text(json.dumps(metadata, indent=2))
+        # Save metadata using helper method
+        self._save_book_metadata(book_dir, title, theme, num_pages, generated, timestamp)
 
         logger.info(f"Generated {len(generated)}/{num_pages} pages")
         logger.info(f"Book saved to: {book_dir}")
