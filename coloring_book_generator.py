@@ -16,9 +16,10 @@ import json
 import time
 import random
 import requests
+import shutil
 from pathlib import Path
 from datetime import datetime
-from typing import List, Optional, Dict, Tuple
+from typing import List, Optional, Dict, Tuple, Any
 import logging
 import sys
 
@@ -95,7 +96,7 @@ def validate_image_quality(image_path: Path,
                           min_width: int = MIN_PRINT_WIDTH,
                           min_height: int = MIN_PRINT_HEIGHT,
                           check_binary: bool = True,
-                          required_dpi: int = REQUIRED_DPI) -> Dict[str, any]:
+                          required_dpi: int = REQUIRED_DPI) -> Dict[str, Any]:
     """Validate that a generated image meets print quality standards.
 
     Args:
@@ -187,7 +188,7 @@ def validate_image_quality(image_path: Path,
     return results
 
 
-def check_system_resources() -> Dict[str, any]:
+def check_system_resources() -> Dict[str, Any]:
     """Check available system resources before generation.
 
     Returns:
