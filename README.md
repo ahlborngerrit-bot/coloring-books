@@ -21,7 +21,7 @@ This generator now features **advanced edge detection** that produces genuine co
 ## Quick Start
 
 ```bash
-# Install dependencies (see SETUP_GUIDE.md for details)
+# Install dependencies (see docs/guides/SETUP_GUIDE.md for details)
 pip install -r requirements.txt
 
 # Quick test - generate 1 sample page
@@ -80,10 +80,11 @@ python batch_generator.py --themes mandalas animals nature --pages 40
 
 ## 📖 Complete Documentation
 
-- **[QUICK_REFERENCE.md](QUICK_REFERENCE.md)** - Command reference and common workflows
-- **[IMPROVEMENTS.md](IMPROVEMENTS.md)** - Complete usage guide and examples
-- **[SETUP_GUIDE.md](SETUP_GUIDE.md)** - Installation instructions
+- **[QUICK_REFERENCE.md](docs/guides/QUICK_REFERENCE.md)** - Command reference and common workflows
+- **[IMPROVEMENTS.md](docs/guides/IMPROVEMENTS.md)** - Complete usage guide and examples
+- **[SETUP_GUIDE.md](docs/guides/SETUP_GUIDE.md)** - Installation instructions
 - **[CHANGELOG.md](CHANGELOG.md)** - Version history and technical details
+- **[docs/README.md](docs/README.md)** - Index of all guides, prompts and the archive
 
 ## Output Structure
 
@@ -102,8 +103,8 @@ output/
 
 ## Documentation
 
-- **[IMPROVEMENTS.md](IMPROVEMENTS.md)** - Complete usage guide and examples
-- **[SETUP_GUIDE.md](SETUP_GUIDE.md)** - Installation instructions
+- **[IMPROVEMENTS.md](docs/guides/IMPROVEMENTS.md)** - Complete usage guide and examples
+- **[SETUP_GUIDE.md](docs/guides/SETUP_GUIDE.md)** - Installation instructions
 - **[CHANGELOG.md](CHANGELOG.md)** - Version history and technical details
 
 ## Requirements

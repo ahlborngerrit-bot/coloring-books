@@ -231,10 +231,10 @@ python coloring_book_generator.py --theme animals --force-lineart --lineart-meth
 
 ## 📖 Documentation
 
-- **[README.md](README.md)** - Overview and quick start
+- **[README.md](../../README.md)** - Overview and quick start
 - **[IMPROVEMENTS.md](IMPROVEMENTS.md)** - Detailed usage guide
 - **[SETUP_GUIDE.md](SETUP_GUIDE.md)** - Installation instructions
-- **[CHANGELOG.md](CHANGELOG.md)** - Version history and technical details
+- **[CHANGELOG.md](../../CHANGELOG.md)** - Version history and technical details
 - **[QUICK_REFERENCE.md](QUICK_REFERENCE.md)** - This file
 
 ## 🎯 Recommended Settings for Amazon KDP

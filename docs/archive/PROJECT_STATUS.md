@@ -270,10 +270,10 @@ python coloring_book_generator.py \
 ## 📞 Support & Resources
 
 ### Documentation
-- Quick start: See [README.md](README.md)
-- Command reference: See [QUICK_REFERENCE.md](QUICK_REFERENCE.md)
-- Installation help: See [SETUP_GUIDE.md](SETUP_GUIDE.md)
-- Usage examples: See [IMPROVEMENTS.md](IMPROVEMENTS.md)
+- Quick start: See [README.md](../../README.md)
+- Command reference: See [QUICK_REFERENCE.md](../guides/QUICK_REFERENCE.md)
+- Installation help: See [SETUP_GUIDE.md](../guides/SETUP_GUIDE.md)
+- Usage examples: See [IMPROVEMENTS.md](../guides/IMPROVEMENTS.md)
 
 ### GitHub
 - Repository: https://github.com/ElliottSax/coloring-books
