@@ -1,0 +1,18 @@
+# Ruff baseline (same pattern as compressor): conservative rules; pre-existing violations are
+# ignored per file so `ruff check .` is green now and blocks NEW issues. Fix a file, then shrink its entry.
+target-version = "py313"
+
+[lint]
+select = ["E4", "E7", "E9", "F"]
+
+[lint.per-file-ignores]
+# baseline 2026-10-12
+"batch_generator.py" = ["F401", "F541"]
+"coloring_book_generator.py" = ["F401", "F541", "F811", "F841"]
+"complete_book_workflow.py" = ["F401", "F541"]
+"cover_generator.py" = ["F401"]
+"generate_covers.py" = ["F401"]
+"regenerate_old_books.py" = ["F541"]
+"test_expanded_coverage.py" = ["F401", "F841"]
+"test_improved_lineart.py" = ["F401", "F541"]
+"test_quality_assurance.py" = ["F401", "F541"]

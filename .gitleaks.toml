@@ -1,0 +1,5 @@
+# gitleaks config: default rules, no exceptions.
+# Full-history scan on 2026-10-12: 0 findings, so there is no allowlist. Add an entry only for a known
+# finding pending rotation, scoped to commit + file + line and commented "TEMPORARY: rotation pending".
+[extend]
+useDefault = true

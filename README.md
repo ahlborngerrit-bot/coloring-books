@@ -130,6 +130,38 @@ Optional backends:
 
 See [CHANGELOG.md](CHANGELOG.md) for full details.
 
+## Development
+
+Python 3.13 (`.python-version`). Reproducible install from the hash-pinned lockfiles:
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install --require-hashes -r requirements-dev.lock   # app + pytest/ruff/pip-tools
+# runtime only: .venv/bin/pip install --require-hashes -r requirements.lock
+```
+
+`requirements.txt` (runtime ranges) and `requirements-dev.txt` (dev pins) are the inputs. To change a dependency, edit them and regenerate both locks:
+
+```bash
+.venv/bin/pip-compile --generate-hashes --strip-extras --allow-unsafe -o requirements.lock requirements.txt
+.venv/bin/pip-compile --generate-hashes --strip-extras --allow-unsafe -o requirements-dev.lock requirements.txt requirements-dev.txt
+```
+
+Environment variables: [`.env.example`](.env.example). Only the `replicate` and `huggingface` backends need a token; `.env` is gitignored.
+
+| Task | Command |
+|---|---|
+| Tests (offline) | `.venv/bin/python -m pytest -q`. `conftest.py` blocks the network and skips the 3 live Pollinations.ai tests; a test that *returns* `False` counts as failed. |
+| Live API tests | `RUN_NETWORK_TESTS=1 .venv/bin/python -m pytest -q` |
+| Lint | `.venv/bin/ruff check .` (rules E4/E7/E9/F; pre-existing violations baselined per file in `ruff.toml`) |
+| Markdown links | `.venv/bin/python scripts/check_md_links.py` |
+| Secret scan | `gitleaks git --config .gitleaks.toml .` |
+| Pre-merge gate | `scripts/premerge_check.sh [PR]` |
+
+`scripts/premerge_check.sh` runs every step and prints a PASS/FAIL/SKIP summary: lock install, tests, ruff, links, gitleaks (SKIP locally without the CLI). With a PR number it checks that PR merged with `origin/main` in a temp worktree. Exit codes: 0 green, 1 red step(s), 2 tool missing, 3 merge conflict with main. It never merges.
+
+CI: [`docs/ci/workflow.yml.template`](docs/ci/workflow.yml.template) runs the same gate on pull requests and pushes to `main`. **To enable: copy it to `.github/workflows/premerge.yml`** (pushing workflow files needs a token with the `workflow` scope).
+
 ## License
 
 MIT - Free for commercial use on Amazon KDP
