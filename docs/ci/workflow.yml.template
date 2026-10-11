@@ -1,0 +1,44 @@
+# TEMPLATE: to enable, copy to .github/workflows/premerge.yml (pushing it needs a token with the `workflow` scope).
+# Same gate as scripts/premerge_check.sh (without the PR-merge mode). Merging stays manual.
+name: premerge
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: premerge-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  premerge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GITLEAKS_VERSION: "8.30.1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history for gitleaks
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+          cache: pip
+          cache-dependency-path: requirements-dev.lock
+
+      - name: Install gitleaks CLI
+        run: |
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            | tar -xz -C /usr/local/bin gitleaks
+          gitleaks version
+
+      # lock install (--require-hashes), pytest (offline), ruff, markdown links, gitleaks
+      - name: Premerge gate
+        env:
+          PYTHON: python
+        run: bash scripts/premerge_check.sh
