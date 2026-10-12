@@ -17,3 +17,7 @@ Static repository inspection confirms `test_improved_lineart.py` constructs a Po
 ## Guardrails
 
 No external image generation by default, no provider spend without explicit budget approval, no claims of KDP compliance without a current checklist and actual output inspection.
+
+## Post-write CI check
+
+After this note was committed, GitHub Actions was queried for the new branch head `1229617225c9e746545daf564ce0ac5859e774ac`. The exact-SHA query returned zero workflow runs. Therefore this documentation commit is verified present, but is not itself CI-tested. This does not invalidate the separate successful run noted above; it limits that result to its own SHA. Re-query CI after any further change.
