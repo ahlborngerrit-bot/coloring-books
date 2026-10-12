@@ -4,9 +4,6 @@ on:
   push:
     branches:
       - review/chatgpt-validation-2026-10-12
-  pull_request:
-    branches:
-      - main
   workflow_dispatch:
 
 permissions:
