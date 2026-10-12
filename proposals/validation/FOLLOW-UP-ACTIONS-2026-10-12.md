@@ -21,3 +21,17 @@ No external image generation by default, no provider spend without explicit budg
 ## Post-write CI check
 
 After this note was committed, GitHub Actions was queried for the new branch head `1229617225c9e746545daf564ce0ac5859e774ac`. The exact-SHA query returned zero workflow runs. Therefore this documentation commit is verified present, but is not itself CI-tested. This does not invalidate the separate successful run noted above; it limits that result to its own SHA. Re-query CI after any further change.
+
+
+## Follow-up execution — 2026-10-12
+
+- Tested workflow-file SHA: `a8fb6bbb0c84d7baa7894604a90b386ffd01821c`
+- Run: https://github.com/ahlborngerrit-bot/coloring-books/actions/runs/38294235145
+- Result: success.
+- Python: 3.12.15.
+- `compileall`: succeeded for the five named Python modules.
+- Offline QA tests: 6 passed, 1 deselected in 0.22 seconds.
+- The deselected test is the remote image-generation integration test. No external image generation was triggered.
+- Dependencies were installed from unpinned `requirements.txt`; this validates a current resolution, not a fully reproducible lockfile build.
+
+The workflow and this status note are proposals on the review branch, not integrated product changes.
