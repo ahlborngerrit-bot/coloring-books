@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 MIN_PRINT_WIDTH = 2550  # 8.5" at 300 DPI
 MIN_PRINT_HEIGHT = 3300  # 11" at 300 DPI
 REQUIRED_DPI = 300
+MAX_BOOK_PAGES = 100  # Bound accidental provider spend and runaway generation
 MAX_ACCEPTABLE_COLORS = 2  # For line art (black & white only)
 
 # Image Quality Constants
@@ -829,7 +830,17 @@ class ColoringBookGenerator:
         metadata_file.write_text(json.dumps(metadata, indent=2))
 
     def generate_book(self, theme: str, num_pages: int = 30, book_title: str = None) -> Path:
-        """Generate a complete coloring book."""
+        """Generate a complete coloring book.
+
+        num_pages is bounded before preflight or provider work to prevent
+        accidental unbounded generation and provider spend.
+        """
+        if (
+            isinstance(num_pages, bool)
+            or not isinstance(num_pages, int)
+            or not 1 <= num_pages <= MAX_BOOK_PAGES
+        ):
+            raise ValueError(f"num_pages must be an integer from 1 to {MAX_BOOK_PAGES}")
 
         # PRE-FLIGHT CHECKS: Ensure system is ready
         if not preflight_checks(force_lineart=self.force_lineart):
