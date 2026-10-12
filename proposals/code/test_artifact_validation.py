@@ -5,9 +5,12 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+import sys
 
 from PIL import Image
 
+# Make the adjacent proposal module importable when tests are run from the repo root.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_improved_lineart_v2 import validate_generated_book
 
 
