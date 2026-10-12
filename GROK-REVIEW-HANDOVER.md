@@ -9,3 +9,14 @@ Please reproduce findings against current source. Run the existing tests from a 
 
 ## Persona review update
 Added `PERSONA-AND-COMPETITOR-AUDIT-2026-10-12.md`. It flags that `test_improved_lineart.py` prints failures without failing the process; proposed isolated patch and deterministic test are described but not executed.
+
+
+## Mandatory change-control policy (owner instruction, 2026-10-12)
+
+- Do not delete files, folders, branches, commits, PRs, content, or history. Only the repository owner or Grokbot may authorize and perform deletion.
+- Do not alter product source on the default branch as part of this review. Put candidate code and proposed changes in clearly named review/proposals paths or a separate review branch.
+- Preserve existing proposal content. Add new sections or new files; do not replace a file without first reading it and preserving its existing content.
+- Do not merge, close, squash, rebase destructively, force-push, or mark a PR ready without explicit owner authorization.
+- Label evidence precisely: static observation, executed command, test result, independently reproduced finding, or unverified hypothesis. Never describe a test/build/security audit as complete without evidence.
+- Verify every write by re-reading the file and inspecting the PR changed-file list. Check that the diff contains no deletions and no product-source changes.
+- For suspected obsolete or duplicate content, document the conflict and recommend a disposition. Leave it intact for the owner/Grokbot to decide.
