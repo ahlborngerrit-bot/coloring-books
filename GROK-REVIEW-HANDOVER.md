@@ -20,3 +20,11 @@ Added `PERSONA-AND-COMPETITOR-AUDIT-2026-10-12.md`. It flags that `test_improved
 - Label evidence precisely: static observation, executed command, test result, independently reproduced finding, or unverified hypothesis. Never describe a test/build/security audit as complete without evidence.
 - Verify every write by re-reading the file and inspecting the PR changed-file list. Check that the diff contains no deletions and no product-source changes.
 - For suspected obsolete or duplicate content, document the conflict and recommend a disposition. Leave it intact for the owner/Grokbot to decide.
+
+
+## New static technical findings + validation candidate (2026-10-12)
+- Read `proposals/STATIC-FINDINGS-2026-10-12.md` for the root script false-green behavior, RGB scalar-count issue, warning-only quality checks, missing book-level completion gate and PDF postflight gap.
+- `proposals/code/test_improved_lineart.py` is a first candidate; it is insufficient by itself because `generate_book` can return a directory after generating fewer than the requested number of pages.
+- `proposals/code/test_improved_lineart_v2.py` and `proposals/code/README-v2.md` add artifact-level checks. They are proposals only and have NOT been executed. Check dependencies, syntax, output metadata schema and strict print-quality policy before adoption.
+- No product source changed; no provider generation or test was run. Do not describe this project as currently validated or production-ready from the historical `TEST_RESULTS.md` alone.
+- Preserve all originals and previous candidates. Do not delete or replace any file.
