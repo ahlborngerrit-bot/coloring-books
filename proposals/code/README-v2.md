@@ -11,3 +11,13 @@ It checks the generator's actual `metadata.json`, expected accepted page count, 
 - Add separate deterministic unit tests for the validator using small local fixtures and a fake generator; test 0/N, N-1/N, N/N, corrupt image, color image, grayscale image, low-resolution image, missing metadata and missing image.
 - DPI metadata alone does not establish physical print size. PDF page size, embedded image resolution, margins and visual defects need separate PDF-level checks and human proofing.
 - NumPy is already listed in the project's requirements, and Pillow is installed as `Pillow` in requirements.
+
+
+## Deterministic test candidate
+A local fixture test file was added at `proposals/code/test_artifact_validation.py`. From the repository root, try it in a clean environment after installing the declared dependencies:
+
+```bash
+PYTHONPATH=proposals/code python -m unittest test_artifact_validation -v
+```
+
+Expected cases include one valid print-size binary fixture and rejection of missing metadata, partial books, missing files, color pixels, path traversal in metadata and corrupt images. This command has NOT been run here; verify import paths and the exact Python/Pillow/NumPy versions first.
