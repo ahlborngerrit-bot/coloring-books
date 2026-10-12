@@ -1,0 +1,37 @@
+name: Review validation (offline-safe)
+
+on:
+  push:
+    branches:
+      - review/chatgpt-validation-2026-10-12
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: coloring-books-review-validation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  offline-validation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: "3.12"
+      - name: Install project dependencies
+        run: python -m pip install -r requirements.txt pytest
+      - name: Compile Python modules
+        run: python -m compileall -q coloring_book_generator.py complete_book_workflow.py cover_generator.py batch_generator.py coloring_book_generator_parallel.py
+      - name: Run local QA tests only (remote generation excluded)
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python -m pytest -q test_quality_assurance.py -k "not integration_single_page"
