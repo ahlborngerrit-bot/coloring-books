@@ -60,6 +60,41 @@ KDP_SIZES = {
     "8.25x8.25": (2475, 2475),    # Square format
 }
 
+def _fit_image_to_canvas(img, target_size: tuple):
+    """Fit a decoded OpenCV image inside a white canvas without distorting it.
+
+    target_size is (width, height). The complete image is scaled uniformly and
+    centered; empty space is white. This preserves circles, character anatomy,
+    and line-art proportions when a square model output is placed on a portrait
+    print page.
+    """
+    import cv2
+    import numpy as np
+
+    target_width, target_height = target_size
+    if target_width <= 0 or target_height <= 0:
+        raise ValueError("target_size dimensions must be positive")
+    if img is None or img.ndim not in (2, 3):
+        raise ValueError("img must be a decoded grayscale or colour image")
+    source_height, source_width = img.shape[:2]
+    if source_width <= 0 or source_height <= 0:
+        raise ValueError("source image dimensions must be positive")
+
+    scale = min(target_width / source_width, target_height / source_height)
+    resized_width = max(1, min(target_width, round(source_width * scale)))
+    resized_height = max(1, min(target_height, round(source_height * scale)))
+    interpolation = cv2.INTER_LANCZOS4 if scale > 1 else cv2.INTER_AREA
+    resized = cv2.resize(img, (resized_width, resized_height), interpolation=interpolation)
+
+    if img.ndim == 2:
+        canvas = np.full((target_height, target_width), 255, dtype=img.dtype)
+    else:
+        canvas = np.full((target_height, target_width, img.shape[2]), 255, dtype=img.dtype)
+    x = (target_width - resized_width) // 2
+    y = (target_height - resized_height) // 2
+    canvas[y:y + resized_height, x:x + resized_width] = resized
+    return canvas
+
 
 # ==================== QUALITY ASSURANCE FUNCTIONS ====================
 
@@ -556,39 +591,26 @@ class ColoringBookGenerator:
                 raise RuntimeError("Image decode failed - cannot ensure print quality")
 
             original_size = (img.shape[1], img.shape[0])
+            logger.info(
+                f"  Fitting {original_size[0]}x{original_size[1]} image into "
+                f"{target_size[0]}x{target_size[1]} print canvas without distortion"
+            )
+            img = _fit_image_to_canvas(img, target_size)
+            if img.shape[1] != target_size[0] or img.shape[0] != target_size[1]:
+                raise RuntimeError(
+                    f"Canvas fitting failed: got {img.shape[1]}x{img.shape[0]}, expected {target_size}"
+                )
 
-            # Check if upscaling needed
-            if img.shape[0] < target_size[1] or img.shape[1] < target_size[0]:
-                logger.info(f"  Upscaling from {img.shape[1]}x{img.shape[0]} to {target_size[0]}x{target_size[1]} for print quality")
-                img = cv2.resize(img, target_size, interpolation=cv2.INTER_LANCZOS4)
-
-                # QUALITY ASSURANCE: Verify upscaling actually worked
-                if img.shape[1] != target_size[0] or img.shape[0] != target_size[1]:
-                    logger.error(f"CRITICAL: Upscaling failed - got {img.shape[1]}x{img.shape[0]}, expected {target_size}")
-                    raise RuntimeError("Upscaling verification failed")
-
-                # Convert to PIL and save with DPI
-                pil_img = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
-                pil_img.info['dpi'] = (300, 300)
-
-                output = BytesIO()
-                pil_img.save(output, format='PNG', dpi=(300, 300))
-
-                # QUALITY ASSURANCE: Verify DPI was set
-                output.seek(0)
-                verify_img = Image.open(output)
-                actual_dpi = verify_img.info.get('dpi', (0, 0))
-                if actual_dpi[0] < 300 or actual_dpi[1] < 300:
-                    logger.warning(f"DPI metadata issue: got {actual_dpi}, expected (300, 300)")
-
-                output.seek(0)
-                return output.getvalue()
-            else:
-                # Image already large enough, just set DPI metadata
-                pil_img = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
-                output = BytesIO()
-                pil_img.save(output, format='PNG', dpi=(300, 300))
-                return output.getvalue()
+            pil_img = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+            output = BytesIO()
+            pil_img.save(output, format='PNG', dpi=(300, 300))
+            output.seek(0)
+            verify_img = Image.open(output)
+            actual_dpi = verify_img.info.get('dpi', (0, 0))
+            if actual_dpi[0] < 299 or actual_dpi[1] < 299:
+                raise RuntimeError(f"DPI metadata verification failed: {actual_dpi}")
+            output.seek(0)
+            return output.getvalue()
 
         except ImportError as e:
             logger.error(f"CRITICAL: Missing dependencies for upscaling: {e}")
@@ -628,15 +650,10 @@ class ColoringBookGenerator:
                 logger.error("CRITICAL: Failed to decode image for line art conversion")
                 raise RuntimeError("Image decode failed during line art conversion")
 
-            # Upscale if needed for print quality (before edge detection)
-            if img.shape[0] < target_size[1] or img.shape[1] < target_size[0]:
-                logger.info(f"  Upscaling from {img.shape[1]}x{img.shape[0]} to {target_size[0]}x{target_size[1]} for print quality")
-                img = cv2.resize(img, target_size, interpolation=cv2.INTER_LANCZOS4)
-
-                # QUALITY ASSURANCE: Verify upscaling
-                if img.shape[1] != target_size[0] or img.shape[0] != target_size[1]:
-                    logger.error(f"CRITICAL: Upscaling in line art conversion failed")
-                    raise RuntimeError("Upscaling verification failed during line art processing")
+            # Fit into the print canvas without stretching the source aspect ratio.
+            img = _fit_image_to_canvas(img, target_size)
+            if img.shape[1] != target_size[0] or img.shape[0] != target_size[1]:
+                raise RuntimeError("Canvas fitting failed during line art processing")
 
             # Convert to grayscale
             gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
