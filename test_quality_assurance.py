@@ -276,3 +276,125 @@ if __name__ == "__main__":
         print("  (Skipped integration test)")
         print("\n  💡 Tip: Run with --full flag for complete testing")
         sys.exit(0)
+
+
+# Deterministic validator regression tests (offline; no provider calls).
+def test_validator_rejects_small_image(tmp_path):
+    from PIL import Image
+    from coloring_book_generator import validate_image_quality
+
+    path = tmp_path / "small.png"
+    Image.new("RGB", (100, 100), "white").save(path, dpi=(300, 300))
+    result = validate_image_quality(path, min_width=2550, min_height=3300, check_binary=True)
+    assert result["valid"] is False
+    assert any("too small" in issue.lower() for issue in result["issues"])
+
+
+def test_validator_rejects_low_dpi_metadata(tmp_path):
+    from PIL import Image
+    from coloring_book_generator import validate_image_quality
+
+    path = tmp_path / "low-dpi.png"
+    Image.new("RGB", (20, 20), "white").save(path, dpi=(72, 72))
+    result = validate_image_quality(path, min_width=1, min_height=1, check_binary=False)
+    assert result["valid"] is False
+    assert any("dpi metadata" in issue.lower() for issue in result["issues"])
+    assert result["metrics"]["physical_width"] > 0
+
+
+def test_validator_rejects_coloured_pixel_hidden_by_channel_value_count(tmp_path):
+    from PIL import Image
+    from coloring_book_generator import validate_image_quality
+
+    image = Image.new("RGB", (20, 20), "white")
+    image.putpixel((0, 0), (255, 0, 0))
+    path = tmp_path / "red-pixel.png"
+    image.save(path, dpi=(300, 300))
+    result = validate_image_quality(path, min_width=1, min_height=1, check_binary=True)
+    assert result["valid"] is False
+    assert result["metrics"]["unique_colors"] == 2
+    assert any("pure black and pure white" in issue.lower() for issue in result["issues"])
+
+
+def test_validator_accepts_pure_black_and_white_with_print_metadata(tmp_path):
+    from PIL import Image
+    from coloring_book_generator import validate_image_quality
+
+    image = Image.new("RGB", (20, 20), "white")
+    for x in range(20):
+        image.putpixel((x, 10), (0, 0, 0))
+    path = tmp_path / "valid-line-art.png"
+    image.save(path, dpi=(300, 300))
+    result = validate_image_quality(path, min_width=1, min_height=1, check_binary=True)
+    assert result["valid"] is True
+    assert result["metrics"]["unique_colors"] == 2
+
+def test_print_canvas_preserves_square_image_aspect_ratio():
+    import numpy as np
+    from coloring_book_generator import _fit_image_to_canvas
+
+    source = np.zeros((100, 100, 3), dtype=np.uint8)
+    fitted = _fit_image_to_canvas(source, (200, 300))
+    assert fitted.shape == (300, 200, 3)
+    # Square source should occupy 200x200 pixels, with centered white bars.
+    assert np.all(fitted[:49, :, :] == 255)
+    assert np.all(fitted[251:, :, :] == 255)
+    assert np.all(fitted[50:250, :, :] == 0)
+
+
+def test_print_canvas_preserves_wide_image_aspect_ratio():
+    import numpy as np
+    from coloring_book_generator import _fit_image_to_canvas
+
+    source = np.zeros((50, 100, 3), dtype=np.uint8)
+    fitted = _fit_image_to_canvas(source, (200, 300))
+    assert fitted.shape == (300, 200, 3)
+    assert np.all(fitted[:99, :, :] == 255)
+    assert np.all(fitted[200:, :, :] == 255)
+    assert np.all(fitted[100:200, :, :] == 0)
+
+def test_pdf_refuses_incomplete_book_without_deleting_page_files(tmp_path, monkeypatch):
+    import json
+    from PIL import Image
+    from coloring_book_generator import ColoringBookGenerator
+
+    book_dir = tmp_path / "book"
+    images_dir = book_dir / "images"
+    images_dir.mkdir(parents=True)
+    accepted = images_dir / "page_001.png"
+    rejected = images_dir / "page_002.png"
+    Image.new("1", (2550, 3300), 1).save(accepted, dpi=(300, 300))
+    Image.new("1", (2550, 3300), 1).save(rejected, dpi=(300, 300))
+    (book_dir / "metadata.json").write_text(json.dumps({
+        "title": "Test Book", "pages": 2, "generated": 1,
+        "pages_data": [{"page": 1, "file": "page_001.png"}]
+    }), encoding="utf-8")
+
+    generator = ColoringBookGenerator(force_lineart=True, output_dir=str(tmp_path / "out"))
+    assert generator.create_pdf(book_dir) is None
+    assert accepted.exists() and rejected.exists()
+
+
+def test_pdf_uses_only_accepted_pages_from_manifest(tmp_path, monkeypatch):
+    import json
+    from PIL import Image
+    from coloring_book_generator import ColoringBookGenerator
+
+    book_dir = tmp_path / "book"
+    images_dir = book_dir / "images"
+    images_dir.mkdir(parents=True)
+    accepted = images_dir / "page_001.png"
+    orphan = images_dir / "page_002.png"
+    Image.new("1", (2550, 3300), 1).save(accepted, dpi=(300, 300))
+    # This orphan is corrupt and must not be considered because it failed
+    # generation/validation and is absent from pages_data.
+    orphan.write_bytes(b"not an image")
+    (book_dir / "metadata.json").write_text(json.dumps({
+        "title": "Test Book", "pages": 1, "generated": 1,
+        "pages_data": [{"page": 1, "file": "page_001.png"}]
+    }), encoding="utf-8")
+
+    generator = ColoringBookGenerator(force_lineart=True, output_dir=str(tmp_path / "out"))
+    pdf = generator.create_pdf(book_dir)
+    assert pdf is not None and pdf.is_file()
+    assert orphan.exists()

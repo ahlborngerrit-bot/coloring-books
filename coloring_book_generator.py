@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 MIN_PRINT_WIDTH = 2550  # 8.5" at 300 DPI
 MIN_PRINT_HEIGHT = 3300  # 11" at 300 DPI
 REQUIRED_DPI = 300
+MAX_BOOK_PAGES = 100  # Bound accidental provider spend and runaway generation
 MAX_ACCEPTABLE_COLORS = 2  # For line art (black & white only)
 
 # Image Quality Constants
@@ -58,6 +59,41 @@ KDP_SIZES = {
     "6x9": (1800, 2700),          # Trade paperback
     "8.25x8.25": (2475, 2475),    # Square format
 }
+
+def _fit_image_to_canvas(img, target_size: tuple):
+    """Fit a decoded OpenCV image inside a white canvas without distorting it.
+
+    target_size is (width, height). The complete image is scaled uniformly and
+    centered; empty space is white. This preserves circles, character anatomy,
+    and line-art proportions when a square model output is placed on a portrait
+    print page.
+    """
+    import cv2
+    import numpy as np
+
+    target_width, target_height = target_size
+    if target_width <= 0 or target_height <= 0:
+        raise ValueError("target_size dimensions must be positive")
+    if img is None or img.ndim not in (2, 3):
+        raise ValueError("img must be a decoded grayscale or colour image")
+    source_height, source_width = img.shape[:2]
+    if source_width <= 0 or source_height <= 0:
+        raise ValueError("source image dimensions must be positive")
+
+    scale = min(target_width / source_width, target_height / source_height)
+    resized_width = max(1, min(target_width, round(source_width * scale)))
+    resized_height = max(1, min(target_height, round(source_height * scale)))
+    interpolation = cv2.INTER_LANCZOS4 if scale > 1 else cv2.INTER_AREA
+    resized = cv2.resize(img, (resized_width, resized_height), interpolation=interpolation)
+
+    if img.ndim == 2:
+        canvas = np.full((target_height, target_width), 255, dtype=img.dtype)
+    else:
+        canvas = np.full((target_height, target_width, img.shape[2]), 255, dtype=img.dtype)
+    x = (target_width - resized_width) // 2
+    y = (target_height - resized_height) // 2
+    canvas[y:y + resized_height, x:x + resized_width] = resized
+    return canvas
 
 
 # ==================== QUALITY ASSURANCE FUNCTIONS ====================
@@ -112,17 +148,10 @@ def validate_image_quality(image_path: Path,
                           min_height: int = MIN_PRINT_HEIGHT,
                           check_binary: bool = True,
                           required_dpi: int = REQUIRED_DPI) -> Dict[str, Any]:
-    """Validate that a generated image meets print quality standards.
+    """Validate image dimensions, DPI metadata, and optional pure B&W line art.
 
-    Args:
-        image_path: Path to the image file
-        min_width: Minimum acceptable width in pixels
-        min_height: Minimum acceptable height in pixels
-        check_binary: Whether to check for pure black & white
-        required_dpi: Required DPI for print quality
-
-    Returns:
-        Dict with validation results and any issues found
+    The valid flag is false when a requested print requirement fails. Warnings
+    are reserved for non-blocking advisory checks such as unusual file size.
     """
     try:
         from PIL import Image
@@ -131,81 +160,91 @@ def validate_image_quality(image_path: Path,
         return {
             'valid': False,
             'error': 'PIL/NumPy not available for validation',
-            'warnings': []
+            'warnings': [],
+            'issues': ['PIL/NumPy not available for validation'],
+            'metrics': {}
         }
 
-    results = {
-        'valid': True,
-        'warnings': [],
-        'issues': [],
-        'metrics': {}
-    }
+    results = {'valid': True, 'warnings': [], 'issues': [], 'metrics': {}}
 
     try:
-        img = Image.open(image_path)
+        with Image.open(image_path) as source:
+            img = source.copy()
+            dpi = source.info.get('dpi', (72, 72))
         width, height = img.size
+        try:
+            dpi_x, dpi_y = float(dpi[0]), float(dpi[1])
+        except (TypeError, IndexError, ValueError):
+            dpi_x, dpi_y = 72.0, 72.0
 
-        # Check dimensions
-        results['metrics']['width'] = width
-        results['metrics']['height'] = height
-        results['metrics']['physical_width'] = width / required_dpi
-        results['metrics']['physical_height'] = height / required_dpi
+        results['metrics'].update({
+            'width': width,
+            'height': height,
+            'dpi': (dpi_x, dpi_y),
+            'physical_width': width / dpi_x if dpi_x > 0 else None,
+            'physical_height': height / dpi_y if dpi_y > 0 else None,
+            'mode': img.mode,
+        })
 
         if width < min_width or height < min_height:
             results['valid'] = False
             results['issues'].append(
-                f"CRITICAL: Image too small ({width}x{height}), needs {min_width}x{min_height} for print"
+                f"CRITICAL: Image too small ({width}x{height}), needs at least "
+                f"{min_width}x{min_height} pixels"
             )
 
-        # Check DPI metadata
-        dpi = img.info.get('dpi', (72, 72))
-        results['metrics']['dpi'] = dpi
-
-        if dpi[0] < required_dpi or dpi[1] < required_dpi:
-            results['warnings'].append(
-                f"DPI metadata is {dpi}, should be {required_dpi} for print"
+        # PNG stores DPI as pixels/metre; conversion to pixels/inch can
+        # round 300 DPI to approximately 299.9994. Allow a 1-DPI metadata
+        # rounding tolerance while still rejecting genuinely low-resolution
+        # metadata such as 72 DPI.
+        if dpi_x < required_dpi - 1 or dpi_y < required_dpi - 1:
+            results['valid'] = False
+            results['issues'].append(
+                f"DPI metadata is {(dpi_x, dpi_y)}, required approximately "
+                f"{required_dpi}x{required_dpi} DPI (1-DPI metadata rounding tolerance)"
             )
 
-        # Check color mode
-        results['metrics']['mode'] = img.mode
-
-        # Check binary (pure black & white) if requested
         if check_binary:
-            arr = np.array(img)
-            unique_colors = len(np.unique(arr))
-            results['metrics']['unique_colors'] = unique_colors
-
-            if unique_colors > MAX_ACCEPTABLE_COLORS:
-                results['warnings'].append(
-                    f"Image has {unique_colors} colors, expected {MAX_ACCEPTABLE_COLORS} for line art"
+            # Count actual pixel colours, not scalar channel values. Counting
+            # np.unique() on an RGB array can miss coloured pixels.
+            rgb = np.asarray(img.convert('RGB'))
+            unique_colors = np.unique(rgb.reshape(-1, 3), axis=0)
+            color_count = len(unique_colors)
+            results['metrics']['unique_colors'] = color_count
+            allowed = {(0, 0, 0), (255, 255, 255)}
+            actual = {tuple(int(channel) for channel in color) for color in unique_colors}
+            if color_count > 2 or not actual.issubset(allowed):
+                results['valid'] = False
+                results['issues'].append(
+                    f"Line art must contain only pure black and pure white pixels; "
+                    f"found {color_count} distinct RGB colours"
                 )
 
-        # Check file size (should be reasonable, not too small or huge)
         file_size = image_path.stat().st_size
         results['metrics']['file_size_kb'] = file_size / 1024
-
         if file_size < MIN_FILE_SIZE_BYTES:
             results['warnings'].append(
-                f"File size very small ({file_size/1024:.1f}KB), may indicate generation issue"
+                f"File size very small ({file_size / 1024:.1f}KB), may indicate generation issue"
             )
         elif file_size > MAX_FILE_SIZE_BYTES:
             results['warnings'].append(
-                f"File size very large ({file_size/1024/1024:.1f}MB), may cause upload issues"
+                f"File size very large ({file_size / 1024 / 1024:.1f}MB), may cause upload issues"
             )
 
-        # Log validation summary
         if results['valid'] and not results['warnings']:
-            logger.debug(f"✓ Quality validation passed: {image_path.name}")
-        elif results['warnings']:
-            logger.warning(f"⚠ Quality warnings for {image_path.name}: {', '.join(results['warnings'])}")
-
+            logger.debug(f"Quality validation passed: {image_path.name}")
+        elif results['warnings'] or results['issues']:
+            logger.warning(
+                f"Quality validation for {image_path.name}: "
+                f"{'; '.join(results['issues'] + results['warnings'])}"
+            )
     except Exception as e:
         results['valid'] = False
         results['error'] = f"Validation failed: {str(e)}"
+        results['issues'].append(results['error'])
         logger.error(f"Validation error for {image_path}: {e}")
 
     return results
-
 
 def check_system_resources() -> Dict[str, Any]:
     """Check available system resources before generation.
@@ -552,39 +591,26 @@ class ColoringBookGenerator:
                 raise RuntimeError("Image decode failed - cannot ensure print quality")
 
             original_size = (img.shape[1], img.shape[0])
+            logger.info(
+                f"  Fitting {original_size[0]}x{original_size[1]} image into "
+                f"{target_size[0]}x{target_size[1]} print canvas without distortion"
+            )
+            img = _fit_image_to_canvas(img, target_size)
+            if img.shape[1] != target_size[0] or img.shape[0] != target_size[1]:
+                raise RuntimeError(
+                    f"Canvas fitting failed: got {img.shape[1]}x{img.shape[0]}, expected {target_size}"
+                )
 
-            # Check if upscaling needed
-            if img.shape[0] < target_size[1] or img.shape[1] < target_size[0]:
-                logger.info(f"  Upscaling from {img.shape[1]}x{img.shape[0]} to {target_size[0]}x{target_size[1]} for print quality")
-                img = cv2.resize(img, target_size, interpolation=cv2.INTER_LANCZOS4)
-
-                # QUALITY ASSURANCE: Verify upscaling actually worked
-                if img.shape[1] != target_size[0] or img.shape[0] != target_size[1]:
-                    logger.error(f"CRITICAL: Upscaling failed - got {img.shape[1]}x{img.shape[0]}, expected {target_size}")
-                    raise RuntimeError("Upscaling verification failed")
-
-                # Convert to PIL and save with DPI
-                pil_img = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
-                pil_img.info['dpi'] = (300, 300)
-
-                output = BytesIO()
-                pil_img.save(output, format='PNG', dpi=(300, 300))
-
-                # QUALITY ASSURANCE: Verify DPI was set
-                output.seek(0)
-                verify_img = Image.open(output)
-                actual_dpi = verify_img.info.get('dpi', (0, 0))
-                if actual_dpi[0] < 300 or actual_dpi[1] < 300:
-                    logger.warning(f"DPI metadata issue: got {actual_dpi}, expected (300, 300)")
-
-                output.seek(0)
-                return output.getvalue()
-            else:
-                # Image already large enough, just set DPI metadata
-                pil_img = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
-                output = BytesIO()
-                pil_img.save(output, format='PNG', dpi=(300, 300))
-                return output.getvalue()
+            pil_img = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+            output = BytesIO()
+            pil_img.save(output, format='PNG', dpi=(300, 300))
+            output.seek(0)
+            verify_img = Image.open(output)
+            actual_dpi = verify_img.info.get('dpi', (0, 0))
+            if actual_dpi[0] < 299 or actual_dpi[1] < 299:
+                raise RuntimeError(f"DPI metadata verification failed: {actual_dpi}")
+            output.seek(0)
+            return output.getvalue()
 
         except ImportError as e:
             logger.error(f"CRITICAL: Missing dependencies for upscaling: {e}")
@@ -624,15 +650,10 @@ class ColoringBookGenerator:
                 logger.error("CRITICAL: Failed to decode image for line art conversion")
                 raise RuntimeError("Image decode failed during line art conversion")
 
-            # Upscale if needed for print quality (before edge detection)
-            if img.shape[0] < target_size[1] or img.shape[1] < target_size[0]:
-                logger.info(f"  Upscaling from {img.shape[1]}x{img.shape[0]} to {target_size[0]}x{target_size[1]} for print quality")
-                img = cv2.resize(img, target_size, interpolation=cv2.INTER_LANCZOS4)
-
-                # QUALITY ASSURANCE: Verify upscaling
-                if img.shape[1] != target_size[0] or img.shape[0] != target_size[1]:
-                    logger.error(f"CRITICAL: Upscaling in line art conversion failed")
-                    raise RuntimeError("Upscaling verification failed during line art processing")
+            # Fit into the print canvas without stretching the source aspect ratio.
+            img = _fit_image_to_canvas(img, target_size)
+            if img.shape[1] != target_size[0] or img.shape[0] != target_size[1]:
+                raise RuntimeError("Canvas fitting failed during line art processing")
 
             # Convert to grayscale
             gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
@@ -829,7 +850,17 @@ class ColoringBookGenerator:
         metadata_file.write_text(json.dumps(metadata, indent=2))
 
     def generate_book(self, theme: str, num_pages: int = 30, book_title: str = None) -> Path:
-        """Generate a complete coloring book."""
+        """Generate a complete coloring book.
+
+        num_pages is bounded before preflight or provider work to prevent
+        accidental unbounded generation and provider spend.
+        """
+        if (
+            isinstance(num_pages, bool)
+            or not isinstance(num_pages, int)
+            or not 1 <= num_pages <= MAX_BOOK_PAGES
+        ):
+            raise ValueError(f"num_pages must be an integer from 1 to {MAX_BOOK_PAGES}")
 
         # PRE-FLIGHT CHECKS: Ensure system is ready
         if not preflight_checks(force_lineart=self.force_lineart):
@@ -920,7 +951,12 @@ class ColoringBookGenerator:
         return book_dir
 
     def create_pdf(self, book_dir: Path, size: str = "8.5x11") -> Optional[Path]:
-        """Compile images into a print-ready PDF."""
+        """Compile only validated, accepted pages into a PDF.
+
+        If generation metadata exists, pages_data is the source of truth. Orphan
+        files left by failed quality checks are never silently included. An
+        incomplete or invalid book is not labelled/returned as a finished PDF.
+        """
         try:
             from reportlab.lib.pagesizes import letter, A4
             from reportlab.pdfgen import canvas
@@ -931,67 +967,103 @@ class ColoringBookGenerator:
             return None
 
         images_dir = book_dir / "images"
-        if not images_dir.exists():
+        if not images_dir.is_dir():
             logger.error(f"Images directory not found: {images_dir}")
             return None
 
-        # Get all images
-        images = sorted(images_dir.glob("*.png"))
+        metadata_file = book_dir / "metadata.json"
+        metadata = {}
+        if metadata_file.exists():
+            try:
+                metadata = json.loads(metadata_file.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                logger.error(f"Cannot read book metadata safely: {exc}")
+                return None
+
+        title = str(metadata.get("title") or "Coloring Book")
+        pages_data = metadata.get("pages_data")
+        if isinstance(pages_data, list):
+            expected = metadata.get("pages")
+            generated_count = metadata.get("generated")
+            if (
+                not pages_data
+                or generated_count != len(pages_data)
+                or (isinstance(expected, int) and generated_count != expected)
+            ):
+                logger.error(
+                    "Refusing to create PDF from incomplete book: "
+                    f"requested={expected}, generated={generated_count}, accepted_records={len(pages_data)}"
+                )
+                return None
+
+            images = []
+            for item in pages_data:
+                if not isinstance(item, dict) or not isinstance(item.get("file"), str):
+                    logger.error("Invalid accepted-page record in metadata; refusing PDF")
+                    return None
+                filename = Path(item["file"]).name
+                if filename != item["file"] or filename in ("", ".", ".."):
+                    logger.error("Unsafe page filename in metadata; refusing PDF")
+                    return None
+                path = images_dir / filename
+                if not path.is_file():
+                    logger.error(f"Accepted page is missing: {filename}")
+                    return None
+                images.append(path)
+        else:
+            # Backward compatibility for older books without an accepted-page
+            # manifest. Such books still receive per-image validation below.
+            logger.warning("Legacy book metadata has no pages_data; validating all PNG files")
+            images = sorted(images_dir.glob("*.png"))
+
         if not images:
-            logger.error("No images found")
+            logger.error("No accepted images found")
             return None
 
-        # Load metadata
-        metadata_file = book_dir / "metadata.json"
-        if metadata_file.exists():
-            metadata = json.loads(metadata_file.read_text())
-            title = metadata.get("title", "Coloring Book")
-        else:
-            title = "Coloring Book"
+        # Validate every page before creating the output. No partial PDF should
+        # be reported as successful when one page is corrupt or unprintable.
+        for img_path in images:
+            validation = validate_image_quality(img_path, check_binary=self.force_lineart)
+            if not validation.get("valid"):
+                logger.error(
+                    f"Refusing PDF because {img_path.name} failed quality validation: "
+                    f"{validation.get('issues', validation.get('error', 'unknown validation error'))}"
+                )
+                return None
+            try:
+                with Image.open(img_path) as image:
+                    image.verify()
+            except Exception as exc:
+                logger.error(f"Refusing PDF because {img_path.name} cannot be decoded: {exc}")
+                return None
 
-        # Create PDF
-        pdf_path = book_dir / f"{title.replace(' ', '_')}.pdf"
+        page_width, page_height = letter if size == "8.5x11" else A4
+        safe_title = title.replace("/", "_").replace("\\", "_").strip() or "Coloring Book"
+        pdf_path = book_dir / f"{safe_title}.pdf"
+        c = canvas.Canvas(str(pdf_path), pagesize=(page_width, page_height))
 
-        # Use letter size for KDP
-        page_width, page_height = letter
-
-        c = canvas.Canvas(str(pdf_path), pagesize=letter)
-
-        # Add title page
-        c.setFont("Helvetica-Bold", 36)
-        c.drawCentredString(page_width/2, page_height/2 + 50, title)
-        c.setFont("Helvetica", 18)
-        c.drawCentredString(page_width/2, page_height/2 - 20, "Adult Coloring Book")
+        c.setFont("Helvetica-Bold", 30)
+        c.drawCentredString(page_width / 2, page_height / 2 + 40, title)
+        c.setFont("Helvetica", 16)
+        c.drawCentredString(page_width / 2, page_height / 2 - 20, "Coloring Book")
         c.showPage()
 
-        # Add coloring pages
         margin = 0.5 * inch
         content_width = page_width - 2 * margin
         content_height = page_height - 2 * margin
-
         for img_path in images:
-            try:
-                img = Image.open(img_path)
+            with Image.open(img_path) as img:
                 img_width, img_height = img.size
-
-                # Calculate scaling to fit page
-                scale = min(content_width / img_width, content_height / img_height)
-                new_width = img_width * scale
-                new_height = img_height * scale
-
-                # Center on page
-                x = (page_width - new_width) / 2
-                y = (page_height - new_height) / 2
-
-                c.drawImage(str(img_path), x, y, new_width, new_height)
-                c.showPage()
-
-            except Exception as e:
-                logger.error(f"Error adding {img_path}: {e}")
+            scale = min(content_width / img_width, content_height / img_height)
+            new_width = img_width * scale
+            new_height = img_height * scale
+            x = (page_width - new_width) / 2
+            y = (page_height - new_height) / 2
+            c.drawImage(str(img_path), x, y, new_width, new_height)
+            c.showPage()
 
         c.save()
-        logger.info(f"PDF created: {pdf_path}")
-
+        logger.info(f"Validated PDF created: {pdf_path}")
         return pdf_path
 
 
