@@ -350,5 +350,5 @@ def test_print_canvas_preserves_wide_image_aspect_ratio():
     fitted = _fit_image_to_canvas(source, (200, 300))
     assert fitted.shape == (300, 200, 3)
     assert np.all(fitted[:99, :, :] == 255)
-    assert np.all(fitted[151:, :, :] == 255)
-    assert np.all(fitted[100:150, :, :] == 0)
+    assert np.all(fitted[200:, :, :] == 255)
+    assert np.all(fitted[100:200, :, :] == 0)
