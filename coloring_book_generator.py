@@ -113,17 +113,10 @@ def validate_image_quality(image_path: Path,
                           min_height: int = MIN_PRINT_HEIGHT,
                           check_binary: bool = True,
                           required_dpi: int = REQUIRED_DPI) -> Dict[str, Any]:
-    """Validate that a generated image meets print quality standards.
+    """Validate image dimensions, DPI metadata, and optional pure B&W line art.
 
-    Args:
-        image_path: Path to the image file
-        min_width: Minimum acceptable width in pixels
-        min_height: Minimum acceptable height in pixels
-        check_binary: Whether to check for pure black & white
-        required_dpi: Required DPI for print quality
-
-    Returns:
-        Dict with validation results and any issues found
+    The valid flag is false when a requested print requirement fails. Warnings
+    are reserved for non-blocking advisory checks such as unusual file size.
     """
     try:
         from PIL import Image
@@ -132,81 +125,87 @@ def validate_image_quality(image_path: Path,
         return {
             'valid': False,
             'error': 'PIL/NumPy not available for validation',
-            'warnings': []
+            'warnings': [],
+            'issues': ['PIL/NumPy not available for validation'],
+            'metrics': {}
         }
 
-    results = {
-        'valid': True,
-        'warnings': [],
-        'issues': [],
-        'metrics': {}
-    }
+    results = {'valid': True, 'warnings': [], 'issues': [], 'metrics': {}}
 
     try:
-        img = Image.open(image_path)
+        with Image.open(image_path) as source:
+            img = source.copy()
+            dpi = source.info.get('dpi', (72, 72))
         width, height = img.size
+        try:
+            dpi_x, dpi_y = float(dpi[0]), float(dpi[1])
+        except (TypeError, IndexError, ValueError):
+            dpi_x, dpi_y = 72.0, 72.0
 
-        # Check dimensions
-        results['metrics']['width'] = width
-        results['metrics']['height'] = height
-        results['metrics']['physical_width'] = width / required_dpi
-        results['metrics']['physical_height'] = height / required_dpi
+        results['metrics'].update({
+            'width': width,
+            'height': height,
+            'dpi': (dpi_x, dpi_y),
+            'physical_width': width / dpi_x if dpi_x > 0 else None,
+            'physical_height': height / dpi_y if dpi_y > 0 else None,
+            'mode': img.mode,
+        })
 
         if width < min_width or height < min_height:
             results['valid'] = False
             results['issues'].append(
-                f"CRITICAL: Image too small ({width}x{height}), needs {min_width}x{min_height} for print"
+                f"CRITICAL: Image too small ({width}x{height}), needs at least "
+                f"{min_width}x{min_height} pixels"
             )
 
-        # Check DPI metadata
-        dpi = img.info.get('dpi', (72, 72))
-        results['metrics']['dpi'] = dpi
-
-        if dpi[0] < required_dpi or dpi[1] < required_dpi:
-            results['warnings'].append(
-                f"DPI metadata is {dpi}, should be {required_dpi} for print"
+        if dpi_x < required_dpi or dpi_y < required_dpi:
+            results['valid'] = False
+            results['issues'].append(
+                f"DPI metadata is {(dpi_x, dpi_y)}, required at least "
+                f"{required_dpi}x{required_dpi} DPI"
             )
 
-        # Check color mode
-        results['metrics']['mode'] = img.mode
-
-        # Check binary (pure black & white) if requested
         if check_binary:
-            arr = np.array(img)
-            unique_colors = len(np.unique(arr))
-            results['metrics']['unique_colors'] = unique_colors
-
-            if unique_colors > MAX_ACCEPTABLE_COLORS:
-                results['warnings'].append(
-                    f"Image has {unique_colors} colors, expected {MAX_ACCEPTABLE_COLORS} for line art"
+            # Count actual pixel colours, not scalar channel values. Counting
+            # np.unique() on an RGB array can miss coloured pixels.
+            rgb = np.asarray(img.convert('RGB'))
+            unique_colors = np.unique(rgb.reshape(-1, 3), axis=0)
+            color_count = len(unique_colors)
+            results['metrics']['unique_colors'] = color_count
+            allowed = {(0, 0, 0), (255, 255, 255)}
+            actual = {tuple(int(channel) for channel in color) for color in unique_colors}
+            if color_count > 2 or not actual.issubset(allowed):
+                results['valid'] = False
+                results['issues'].append(
+                    f"Line art must contain only pure black and pure white pixels; "
+                    f"found {color_count} distinct RGB colours"
                 )
 
-        # Check file size (should be reasonable, not too small or huge)
         file_size = image_path.stat().st_size
         results['metrics']['file_size_kb'] = file_size / 1024
-
         if file_size < MIN_FILE_SIZE_BYTES:
             results['warnings'].append(
-                f"File size very small ({file_size/1024:.1f}KB), may indicate generation issue"
+                f"File size very small ({file_size / 1024:.1f}KB), may indicate generation issue"
             )
         elif file_size > MAX_FILE_SIZE_BYTES:
             results['warnings'].append(
-                f"File size very large ({file_size/1024/1024:.1f}MB), may cause upload issues"
+                f"File size very large ({file_size / 1024 / 1024:.1f}MB), may cause upload issues"
             )
 
-        # Log validation summary
         if results['valid'] and not results['warnings']:
-            logger.debug(f"✓ Quality validation passed: {image_path.name}")
-        elif results['warnings']:
-            logger.warning(f"⚠ Quality warnings for {image_path.name}: {', '.join(results['warnings'])}")
-
+            logger.debug(f"Quality validation passed: {image_path.name}")
+        elif results['warnings'] or results['issues']:
+            logger.warning(
+                f"Quality validation for {image_path.name}: "
+                f"{'; '.join(results['issues'] + results['warnings'])}"
+            )
     except Exception as e:
         results['valid'] = False
         results['error'] = f"Validation failed: {str(e)}"
+        results['issues'].append(results['error'])
         logger.error(f"Validation error for {image_path}: {e}")
 
     return results
-
 
 def check_system_resources() -> Dict[str, Any]:
     """Check available system resources before generation.
