@@ -951,7 +951,12 @@ class ColoringBookGenerator:
         return book_dir
 
     def create_pdf(self, book_dir: Path, size: str = "8.5x11") -> Optional[Path]:
-        """Compile images into a print-ready PDF."""
+        """Compile only validated, accepted pages into a PDF.
+
+        If generation metadata exists, pages_data is the source of truth. Orphan
+        files left by failed quality checks are never silently included. An
+        incomplete or invalid book is not labelled/returned as a finished PDF.
+        """
         try:
             from reportlab.lib.pagesizes import letter, A4
             from reportlab.pdfgen import canvas
@@ -962,67 +967,103 @@ class ColoringBookGenerator:
             return None
 
         images_dir = book_dir / "images"
-        if not images_dir.exists():
+        if not images_dir.is_dir():
             logger.error(f"Images directory not found: {images_dir}")
             return None
 
-        # Get all images
-        images = sorted(images_dir.glob("*.png"))
+        metadata_file = book_dir / "metadata.json"
+        metadata = {}
+        if metadata_file.exists():
+            try:
+                metadata = json.loads(metadata_file.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                logger.error(f"Cannot read book metadata safely: {exc}")
+                return None
+
+        title = str(metadata.get("title") or "Coloring Book")
+        pages_data = metadata.get("pages_data")
+        if isinstance(pages_data, list):
+            expected = metadata.get("pages")
+            generated_count = metadata.get("generated")
+            if (
+                not pages_data
+                or generated_count != len(pages_data)
+                or (isinstance(expected, int) and generated_count != expected)
+            ):
+                logger.error(
+                    "Refusing to create PDF from incomplete book: "
+                    f"requested={expected}, generated={generated_count}, accepted_records={len(pages_data)}"
+                )
+                return None
+
+            images = []
+            for item in pages_data:
+                if not isinstance(item, dict) or not isinstance(item.get("file"), str):
+                    logger.error("Invalid accepted-page record in metadata; refusing PDF")
+                    return None
+                filename = Path(item["file"]).name
+                if filename != item["file"] or filename in ("", ".", ".."):
+                    logger.error("Unsafe page filename in metadata; refusing PDF")
+                    return None
+                path = images_dir / filename
+                if not path.is_file():
+                    logger.error(f"Accepted page is missing: {filename}")
+                    return None
+                images.append(path)
+        else:
+            # Backward compatibility for older books without an accepted-page
+            # manifest. Such books still receive per-image validation below.
+            logger.warning("Legacy book metadata has no pages_data; validating all PNG files")
+            images = sorted(images_dir.glob("*.png"))
+
         if not images:
-            logger.error("No images found")
+            logger.error("No accepted images found")
             return None
 
-        # Load metadata
-        metadata_file = book_dir / "metadata.json"
-        if metadata_file.exists():
-            metadata = json.loads(metadata_file.read_text())
-            title = metadata.get("title", "Coloring Book")
-        else:
-            title = "Coloring Book"
+        # Validate every page before creating the output. No partial PDF should
+        # be reported as successful when one page is corrupt or unprintable.
+        for img_path in images:
+            validation = validate_image_quality(img_path, check_binary=self.force_lineart)
+            if not validation.get("valid"):
+                logger.error(
+                    f"Refusing PDF because {img_path.name} failed quality validation: "
+                    f"{validation.get('issues', validation.get('error', 'unknown validation error'))}"
+                )
+                return None
+            try:
+                with Image.open(img_path) as image:
+                    image.verify()
+            except Exception as exc:
+                logger.error(f"Refusing PDF because {img_path.name} cannot be decoded: {exc}")
+                return None
 
-        # Create PDF
-        pdf_path = book_dir / f"{title.replace(' ', '_')}.pdf"
+        page_width, page_height = letter if size == "8.5x11" else A4
+        safe_title = title.replace("/", "_").replace("\\", "_").strip() or "Coloring Book"
+        pdf_path = book_dir / f"{safe_title}.pdf"
+        c = canvas.Canvas(str(pdf_path), pagesize=(page_width, page_height))
 
-        # Use letter size for KDP
-        page_width, page_height = letter
-
-        c = canvas.Canvas(str(pdf_path), pagesize=letter)
-
-        # Add title page
-        c.setFont("Helvetica-Bold", 36)
-        c.drawCentredString(page_width/2, page_height/2 + 50, title)
-        c.setFont("Helvetica", 18)
-        c.drawCentredString(page_width/2, page_height/2 - 20, "Adult Coloring Book")
+        c.setFont("Helvetica-Bold", 30)
+        c.drawCentredString(page_width / 2, page_height / 2 + 40, title)
+        c.setFont("Helvetica", 16)
+        c.drawCentredString(page_width / 2, page_height / 2 - 20, "Coloring Book")
         c.showPage()
 
-        # Add coloring pages
         margin = 0.5 * inch
         content_width = page_width - 2 * margin
         content_height = page_height - 2 * margin
-
         for img_path in images:
-            try:
-                img = Image.open(img_path)
+            with Image.open(img_path) as img:
                 img_width, img_height = img.size
-
-                # Calculate scaling to fit page
-                scale = min(content_width / img_width, content_height / img_height)
-                new_width = img_width * scale
-                new_height = img_height * scale
-
-                # Center on page
-                x = (page_width - new_width) / 2
-                y = (page_height - new_height) / 2
-
-                c.drawImage(str(img_path), x, y, new_width, new_height)
-                c.showPage()
-
-            except Exception as e:
-                logger.error(f"Error adding {img_path}: {e}")
+            scale = min(content_width / img_width, content_height / img_height)
+            new_width = img_width * scale
+            new_height = img_height * scale
+            x = (page_width - new_width) / 2
+            y = (page_height - new_height) / 2
+            c.drawImage(str(img_path), x, y, new_width, new_height)
+            c.showPage()
 
         c.save()
-        logger.info(f"PDF created: {pdf_path}")
-
+        logger.info(f"Validated PDF created: {pdf_path}")
         return pdf_path
 
 
