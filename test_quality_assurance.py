@@ -276,3 +276,55 @@ if __name__ == "__main__":
         print("  (Skipped integration test)")
         print("\n  💡 Tip: Run with --full flag for complete testing")
         sys.exit(0)
+
+
+# Deterministic validator regression tests (offline; no provider calls).
+def test_validator_rejects_small_image(tmp_path):
+    from PIL import Image
+    from coloring_book_generator import validate_image_quality
+
+    path = tmp_path / "small.png"
+    Image.new("RGB", (100, 100), "white").save(path, dpi=(300, 300))
+    result = validate_image_quality(path, min_width=2550, min_height=3300, check_binary=True)
+    assert result["valid"] is False
+    assert any("too small" in issue.lower() for issue in result["issues"])
+
+
+def test_validator_rejects_low_dpi_metadata(tmp_path):
+    from PIL import Image
+    from coloring_book_generator import validate_image_quality
+
+    path = tmp_path / "low-dpi.png"
+    Image.new("RGB", (20, 20), "white").save(path, dpi=(72, 72))
+    result = validate_image_quality(path, min_width=1, min_height=1, check_binary=False)
+    assert result["valid"] is False
+    assert any("dpi metadata" in issue.lower() for issue in result["issues"])
+    assert result["metrics"]["physical_width"] > 0
+
+
+def test_validator_rejects_coloured_pixel_hidden_by_channel_value_count(tmp_path):
+    from PIL import Image
+    from coloring_book_generator import validate_image_quality
+
+    image = Image.new("RGB", (20, 20), "white")
+    image.putpixel((0, 0), (255, 0, 0))
+    path = tmp_path / "red-pixel.png"
+    image.save(path, dpi=(300, 300))
+    result = validate_image_quality(path, min_width=1, min_height=1, check_binary=True)
+    assert result["valid"] is False
+    assert result["metrics"]["unique_colors"] == 2
+    assert any("pure black and pure white" in issue.lower() for issue in result["issues"])
+
+
+def test_validator_accepts_pure_black_and_white_with_print_metadata(tmp_path):
+    from PIL import Image
+    from coloring_book_generator import validate_image_quality
+
+    image = Image.new("RGB", (20, 20), "white")
+    for x in range(20):
+        image.putpixel((x, 10), (0, 0, 0))
+    path = tmp_path / "valid-line-art.png"
+    image.save(path, dpi=(300, 300))
+    result = validate_image_quality(path, min_width=1, min_height=1, check_binary=True)
+    assert result["valid"] is True
+    assert result["metrics"]["unique_colors"] == 2
