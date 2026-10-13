@@ -328,3 +328,27 @@ def test_validator_accepts_pure_black_and_white_with_print_metadata(tmp_path):
     result = validate_image_quality(path, min_width=1, min_height=1, check_binary=True)
     assert result["valid"] is True
     assert result["metrics"]["unique_colors"] == 2
+
+def test_print_canvas_preserves_square_image_aspect_ratio():
+    import numpy as np
+    from coloring_book_generator import _fit_image_to_canvas
+
+    source = np.zeros((100, 100, 3), dtype=np.uint8)
+    fitted = _fit_image_to_canvas(source, (200, 300))
+    assert fitted.shape == (300, 200, 3)
+    # Square source should occupy 200x200 pixels, with centered white bars.
+    assert np.all(fitted[:49, :, :] == 255)
+    assert np.all(fitted[251:, :, :] == 255)
+    assert np.all(fitted[50:250, :, :] == 0)
+
+
+def test_print_canvas_preserves_wide_image_aspect_ratio():
+    import numpy as np
+    from coloring_book_generator import _fit_image_to_canvas
+
+    source = np.zeros((50, 100, 3), dtype=np.uint8)
+    fitted = _fit_image_to_canvas(source, (200, 300))
+    assert fitted.shape == (300, 200, 3)
+    assert np.all(fitted[:99, :, :] == 255)
+    assert np.all(fitted[151:, :, :] == 255)
+    assert np.all(fitted[100:150, :, :] == 0)
