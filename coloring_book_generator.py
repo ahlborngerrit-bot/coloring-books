@@ -158,11 +158,15 @@ def validate_image_quality(image_path: Path,
                 f"{min_width}x{min_height} pixels"
             )
 
-        if dpi_x < required_dpi or dpi_y < required_dpi:
+        # PNG stores DPI as pixels/metre; conversion to pixels/inch can
+        # round 300 DPI to approximately 299.9994. Allow a 1-DPI metadata
+        # rounding tolerance while still rejecting genuinely low-resolution
+        # metadata such as 72 DPI.
+        if dpi_x < required_dpi - 1 or dpi_y < required_dpi - 1:
             results['valid'] = False
             results['issues'].append(
-                f"DPI metadata is {(dpi_x, dpi_y)}, required at least "
-                f"{required_dpi}x{required_dpi} DPI"
+                f"DPI metadata is {(dpi_x, dpi_y)}, required approximately "
+                f"{required_dpi}x{required_dpi} DPI (1-DPI metadata rounding tolerance)"
             )
 
         if check_binary:
