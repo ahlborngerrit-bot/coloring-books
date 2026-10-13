@@ -352,3 +352,49 @@ def test_print_canvas_preserves_wide_image_aspect_ratio():
     assert np.all(fitted[:99, :, :] == 255)
     assert np.all(fitted[200:, :, :] == 255)
     assert np.all(fitted[100:200, :, :] == 0)
+
+def test_pdf_refuses_incomplete_book_without_deleting_page_files(tmp_path, monkeypatch):
+    import json
+    from PIL import Image
+    from coloring_book_generator import ColoringBookGenerator
+
+    book_dir = tmp_path / "book"
+    images_dir = book_dir / "images"
+    images_dir.mkdir(parents=True)
+    accepted = images_dir / "page_001.png"
+    rejected = images_dir / "page_002.png"
+    Image.new("1", (2550, 3300), 1).save(accepted, dpi=(300, 300))
+    Image.new("1", (2550, 3300), 1).save(rejected, dpi=(300, 300))
+    (book_dir / "metadata.json").write_text(json.dumps({
+        "title": "Test Book", "pages": 2, "generated": 1,
+        "pages_data": [{"page": 1, "file": "page_001.png"}]
+    }), encoding="utf-8")
+
+    generator = ColoringBookGenerator(force_lineart=True, output_dir=str(tmp_path / "out"))
+    assert generator.create_pdf(book_dir) is None
+    assert accepted.exists() and rejected.exists()
+
+
+def test_pdf_uses_only_accepted_pages_from_manifest(tmp_path, monkeypatch):
+    import json
+    from PIL import Image
+    from coloring_book_generator import ColoringBookGenerator
+
+    book_dir = tmp_path / "book"
+    images_dir = book_dir / "images"
+    images_dir.mkdir(parents=True)
+    accepted = images_dir / "page_001.png"
+    orphan = images_dir / "page_002.png"
+    Image.new("1", (2550, 3300), 1).save(accepted, dpi=(300, 300))
+    # This orphan is corrupt and must not be considered because it failed
+    # generation/validation and is absent from pages_data.
+    orphan.write_bytes(b"not an image")
+    (book_dir / "metadata.json").write_text(json.dumps({
+        "title": "Test Book", "pages": 1, "generated": 1,
+        "pages_data": [{"page": 1, "file": "page_001.png"}]
+    }), encoding="utf-8")
+
+    generator = ColoringBookGenerator(force_lineart=True, output_dir=str(tmp_path / "out"))
+    pdf = generator.create_pdf(book_dir)
+    assert pdf is not None and pdf.is_file()
+    assert orphan.exists()
